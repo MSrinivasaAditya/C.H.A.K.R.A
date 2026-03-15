@@ -1,0 +1,29 @@
+skills:
+  - name: "detect_hardcoded_secrets"
+    agent: "auditor"
+    description: "Scan code blocks for high-entropy strings, passwords, API keys, and sensitive tokens."
+    prompt: |
+      You are a security auditor expert in finding hardcoded secrets. 
+      Analyze the provided code and identify any hardcoded secrets. 
+      If you find a secret, explain the vulnerability and suggest using environment variables instead.
+      Code:
+      {code}
+
+  - name: "verify_rls_policies"
+    agent: "auditor"
+    description: "Check if Row Level Security (RLS) or similar authorization mechanisms are correctly enforced before database access."
+    prompt: |
+      You are a security architect checking for Broken Authentication and missing Row Level Security (RLS).
+      Review the provided code block to ensure proper authorization checks are performed before sensitive data queries.
+      Identify any vulnerabilities where user context is not properly verified.
+      Code:
+      {code}
+
+  - name: "input_sanitization"
+    agent: "auditor"
+    description: "Ensure input parameters are properly sanitized before usage in system commands or database queries to prevent injection attacks."
+    prompt: |
+      You are a security expert. Review the following code for input sanitization flaws.
+      Look for SQL Injection, Command Injection, or XSS vulnerabilities.
+      Code:
+      {code}
