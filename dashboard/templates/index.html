@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>VibeSentinel - Security Auditor IDE</title>
+    <title>C.H.A.K.R.A - Security Auditor IDE</title>
     <link
       href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
       rel="stylesheet"
@@ -484,10 +484,10 @@ def example_function():
       </div>
     </div>
 
-    <!-- Right Side: VibeSentinel Copilot Panel -->
+    <!-- Right Side: C.H.A.K.R.A Copilot Panel -->
     <div class="side-panel">
       <div class="panel-header" id="panel-header">
-        <div class="panel-tab active" onclick="switchPanelTab('vibesentinel')">VibeSentinel</div>
+        <div class="panel-tab active" onclick="switchPanelTab('chakra')">C.H.A.K.R.A</div>
         <div class="panel-tab" onclick="switchPanelTab('directory')">Directory</div>
         <div class="panel-tab" onclick="switchPanelTab('git')">Git</div>
         <div class="panel-tab" style="margin-left: auto; letter-spacing: 2px">
@@ -496,8 +496,8 @@ def example_function():
       </div>
 
       <div class="panel-content" id="panel-container">
-        <!-- VibeSentinel Results Tab -->
-        <div id="tab-vibesentinel" class="panel-content-tab active">
+        <!-- C.H.A.K.R.A Results Tab -->
+        <div id="tab-chakra" class="panel-content-tab active">
           <div>
             <div class="greeting">
               Suggest security improvements & patches for this workspace.
@@ -524,7 +524,7 @@ def example_function():
             </p>
           </div>
 
-          <div id="vibesentinel-results">
+          <div id="chakra-results">
             {% if results.patches %} {% for patch in results.patches %}
             <div class="suggestion-card">
               <div class="suggestion-title">
@@ -738,7 +738,7 @@ def example_function():
           const tabs = document.querySelectorAll('#panel-header .panel-tab');
           tabs.forEach(t => {
               const text = t.textContent.toLowerCase();
-              if ((tabId === 'vibesentinel' && text.includes('vibe')) || 
+              if ((tabId === 'chakra' && text.includes('c.h.a.k.r.a')) || 
                   (tabId === 'directory' && text.includes('dir')) || 
                   (tabId === 'git' && text.includes('git'))) {
                   t.classList.add('active');
@@ -760,7 +760,7 @@ def example_function():
 
       async function scanCode() {
         const code = document.getElementById("source-code").value;
-        const resultArea = document.getElementById("vibesentinel-results");
+        const resultArea = document.getElementById("chakra-results");
         const dirContent = document.getElementById("directory-content");
 
         if (!code.trim()) {
@@ -768,7 +768,7 @@ def example_function():
           return;
         }
 
-        switchPanelTab('vibesentinel');
+        switchPanelTab('chakra');
         
         // Reset directory for local code mode
         if (dirContent) {
@@ -800,7 +800,7 @@ def example_function():
       async function scanRepo() {
         const repoUrl = document.getElementById("repo-url").value;
         const gitStatus = document.getElementById("git-status-display");
-        const resultArea = document.getElementById("vibesentinel-results");
+        const resultArea = document.getElementById("chakra-results");
 
         if (!repoUrl.trim()) {
           alert("Please enter a GitHub repository URL!");
@@ -830,7 +830,7 @@ def example_function():
           gitStatus.innerHTML = `<div style="color:#10b981; padding: 12px; font-size:13px; font-weight:600;">✓ Scan Complete. Reviewing results...</div>`;
           
           setTimeout(async () => {
-              switchPanelTab('vibesentinel');
+              switchPanelTab('chakra');
               renderResults(data);
               await loadDirectory();
               gitStatus.innerHTML = "";
@@ -894,9 +894,9 @@ def example_function():
       }
 
       function renderResults(data) {
-        const resultArea = document.getElementById("vibesentinel-results");
+        const resultArea = document.getElementById("chakra-results");
         // Update summary stats in the header of the tab
-        const issuesStat = document.querySelector('#tab-vibesentinel .stat-chip[style*="background: #eef2ff"]');
+        const issuesStat = document.querySelector('#tab-chakra .stat-chip[style*="background: #eef2ff"]');
         if (issuesStat) {
             issuesStat.innerHTML = `Issues: ${data.summary?.issues_found || 0} | Patches: ${data.summary?.patches_generated || 0}`;
         }

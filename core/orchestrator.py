@@ -15,7 +15,7 @@ class AgentOrchestrator:
     Coordinates the multi-agent 'Security Squad' framework and the Agentic Loop.
     """
     def __init__(self, target_dir: str):
-        print("[Orchestrator] Initializing VibeSentinel Security Squad...")
+        print("[Orchestrator] Initializing C.H.A.K.R.A Security Squad...")
         self.target_dir = target_dir
         self.llm = LocalLLMClient()
         self.db = ChromaDBManager()

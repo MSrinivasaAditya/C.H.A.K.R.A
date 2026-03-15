@@ -34,7 +34,7 @@ def get_results():
 async def read_root(request: Request):
     """
     Renders the local HITL (Human-In-The-Loop) Dashboard showing proposed patches
-    and results from the VibeSentinel air-gapped auditor.
+    and results from the C.H.A.K.R.A air-gapped auditor.
     """
     results = get_results()
     return templates.TemplateResponse(

@@ -37,7 +37,7 @@ def run_agents(target: str):
     print("[CLI] Agentic loop completed. Results are ready for Human-in-the-Loop review.")
 
 def main():
-    parser = argparse.ArgumentParser(description="VibeSentinel Air-Gapped Multi-Agent Security Auditor")
+    parser = argparse.ArgumentParser(description="C.H.A.K.R.A Air-Gapped Multi-Agent Security Auditor")
     
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
     
