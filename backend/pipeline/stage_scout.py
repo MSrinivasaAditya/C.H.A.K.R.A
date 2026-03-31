@@ -14,6 +14,7 @@ class ASTAnalyzer:
         """
         Parses a single file to extract classes, functions, and imports.
         """
+        source = ""
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 source = f.read()

@@ -1,8 +1,5 @@
-fastapi
-uvicorn
-chromadb
-pyyaml
-docker
-requests
-jinja2
+anthropic
+semgrep
 python-dotenv
+requests
+gitpython
