@@ -1,82 +1,122 @@
 import os
 import requests
-import json
 import anthropic
+import json
+import logging
+from dotenv import load_dotenv
+
+# Load environment variables from .env if present
+load_dotenv()
+logger = logging.getLogger(__name__)
 
 class LLMClient:
     """
-    Dual-mode LLM client: Local via Ollama or Cloud API via Anthropic.
+    A single class that abstracts away whether the LLM is Ollama (local) or Anthropic (cloud).
+    The rest of the codebase never checks which mode is active.
     """
-    def __init__(self, mode: str = "ollama", model_name: str = None, base_url: str = "http://localhost:11434"):
-        self.mode = mode
-        self.base_url = base_url
-        if self.mode == "ollama":
-            self.model_name = model_name or "qwen2.5-coder:7b"
-        elif self.mode == "anthropic":
-            self.model_name = model_name or "claude-3-5-sonnet-20241022"
-            self.api_key = os.getenv("ANTHROPIC_API_KEY")
-            if not self.api_key:
-                raise ValueError("ANTHROPIC_API_KEY environment variable is required for anthropic mode.")
-            self.client = anthropic.Anthropic(api_key=self.api_key)
+    def __init__(self):
+        self.backend = os.getenv("LLM_BACKEND", "anthropic").lower()
+        
+        if self.backend == "anthropic":
+            api_key = os.getenv("ANTHROPIC_API_KEY")
+            if not api_key:
+                raise ValueError("ANTHROPIC_API_KEY is required when LLM_BACKEND is anthropic")
+            self.client = anthropic.Anthropic(api_key=api_key)
+            self.anthropic_model = "claude-sonnet-4-20250514"
+        elif self.backend == "ollama":
+            self.ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+            self.ollama_model = os.getenv("OLLAMA_MODEL", "codellama:13b")
         else:
-            raise ValueError(f"Unknown mode: {self.mode}")
+            raise ValueError(f"Unsupported LLM_BACKEND: {self.backend}. Must be 'anthropic' or 'ollama'.")
 
-    def generate(self, prompt: str, system_prompt: str = "") -> str:
-        if self.mode == "ollama":
-            return self._generate_ollama(prompt, system_prompt)
-        elif self.mode == "anthropic":
-            return self._generate_anthropic(prompt, system_prompt)
+    def complete(self, system_prompt: str, user_prompt: str, expect_json: bool = False):
+        """
+        Takes system and user prompts and returns the LLM's response.
+        If expect_json=True, returns a parsed dict. Otherwise returns a string.
+        On network errors, returns a structured error dict.
+        """
+        json_instruction = "Respond only with valid JSON. No preamble, no markdown fences, no explanation outside the JSON structure."
+        
+        if expect_json:
+            system_prompt = f"{system_prompt}\n\n{json_instruction}"
+
+        # 1. Dispatch Request
+        if self.backend == "anthropic":
+            raw_response = self._complete_anthropic(system_prompt, user_prompt)
+        elif self.backend == "ollama":
+            raw_response = self._complete_ollama(system_prompt, user_prompt)
         else:
-            raise ValueError(f"Unknown mode: {self.mode}")
+            return {"error": f"Unknown backend state: {self.backend}"}
 
-    def _generate_ollama(self, prompt: str, system_prompt: str) -> str:
-        url = f"{self.base_url}/api/generate"
-        payload = {
-            "model": self.model_name,
-            "prompt": prompt,
-            "system": system_prompt,
-            "stream": False
-        }
-        try:
-            response = requests.post(url, json=payload, timeout=120)
-            response.raise_for_status()
-            data = response.json()
-            return data.get("response", "")
-        except requests.exceptions.RequestException as e:
-            return f"Error communicating with local LLM: {e}"
+        # 2. Check for Network Errors
+        if isinstance(raw_response, dict) and "error" in raw_response:
+            return raw_response
 
-    def _generate_anthropic(self, prompt: str, system_prompt: str) -> str:
+        # 3. Handle Output format
+        if expect_json:
+            return self._parse_json(raw_response)
+        
+        return raw_response
+
+    def _complete_anthropic(self, system_prompt: str, user_prompt: str):
         try:
             response = self.client.messages.create(
-                model=self.model_name,
-                max_tokens=4096,
+                model=self.anthropic_model,
+                max_tokens=2000,
                 system=system_prompt,
                 messages=[
-                    {"role": "user", "content": prompt}
-                ]
+                    {"role": "user", "content": user_prompt}
+                ],
+                timeout=60.0
             )
             return response.content[0].text
         except Exception as e:
-            return f"Error communicating with Anthropic: {e}"
+            return {"error": f"Network Error (Anthropic): {str(e)}"}
 
-    def get_embeddings(self, text: str) -> list[float]:
-        """
-        Retrieves embeddings for a given text from the local LLM.
-        """
-        url = f"{self.base_url}/api/embeddings"
+    def _complete_ollama(self, system_prompt: str, user_prompt: str):
+        url = f"{self.ollama_host}/api/generate"
+        
+        # Concatenation of system and user prompts with a clear separator
+        full_prompt = f"System:\n{system_prompt}\n\nUser:\n{user_prompt}"
+        
         payload = {
-            "model": self.model_name if self.mode == "ollama" else "qwen2.5-coder:7b",
-            "prompt": text
+            "model": self.ollama_model,
+            "prompt": full_prompt,
+            "stream": False
         }
+        
         try:
-            response = requests.post(url, json=payload, timeout=30)
+            response = requests.post(url, json=payload, timeout=60.0)
             response.raise_for_status()
-            data = response.json()
-            return data.get("embedding", [])
-        except requests.exceptions.RequestException as e:
-            print(f"Error fetching embeddings: {e}")
-            return []
+            return response.json().get("response", "")
+        except Exception as e:
+            return {"error": f"Network Error (Ollama): {str(e)}"}
+
+    def _parse_json(self, text: str):
+        text = text.strip()
+        
+        # Clean up stray markdown fences silently
+        if text.startswith("```json"):
+            text = text[7:]
+        elif text.startswith("```"):
+            text = text[3:]
+            
+        if text.endswith("```"):
+            text = text[:-3]
+            
+        text = text.strip()
+        
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError as e:
+            # Note: logging raw text so developers can observe why it failed without crashing server
+            logger.error(f"JSON Parsing failed: {e}\nRaw Response:\n{text}")
+            return {}
 
 if __name__ == "__main__":
-    client = LLMClient(mode="ollama")
-    print(client.generate("Test prompt - Reply 'Hello World' if working."))
+    # Test initialization
+    try:
+        client = LLMClient()
+        print(f"Successfully initialized LLMClient with backend: {client.backend}")
+    except Exception as e:
+        print(f"Initialization Failed: {e}")
