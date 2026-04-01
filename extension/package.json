@@ -1,0 +1,74 @@
+{
+  "name": "chakra-security",
+  "displayName": "CHAKRA Security",
+  "description": "Real-time AI-powered security analysis for your code, powered by the C.H.A.K.R.A pipeline.",
+  "version": "0.1.0",
+  "publisher": "chakra-team",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other", "Linters"],
+  "activationEvents": ["onLanguage:python"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "chakra.scanFile",
+        "title": "CHAKRA: Scan Current File"
+      },
+      {
+        "command": "chakra.dismissFinding",
+        "title": "CHAKRA: Dismiss Finding"
+      },
+      {
+        "command": "chakra.openDashboard",
+        "title": "CHAKRA: Open Dashboard"
+      }
+    ],
+    "configuration": {
+      "title": "CHAKRA Security",
+      "properties": {
+        "chakra.serverUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:7777",
+          "description": "URL of the CHAKRA backend server."
+        },
+        "chakra.organizationId": {
+          "type": "string",
+          "default": "default",
+          "description": "Your organization identifier, used to group findings."
+        },
+        "chakra.developerId": {
+          "type": "string",
+          "default": "anon",
+          "description": "Your developer identifier, used for per-developer rate limiting and attribution."
+        },
+        "chakra.authToken": {
+          "type": "string",
+          "default": "",
+          "description": "Optional Bearer token for authenticating with the CHAKRA server. Leave empty for local use."
+        },
+        "chakra.autoScanOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically scan file when saved."
+        },
+        "chakra.autoScanDelay": {
+          "type": "number",
+          "default": 1500,
+          "description": "Delay in milliseconds after save before triggering a scan."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0"
+  }
+}

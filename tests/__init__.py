@@ -1,0 +1,1 @@
+# CHAKRA acceptance-test package
