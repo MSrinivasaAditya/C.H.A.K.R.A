@@ -1,0 +1,264 @@
+rules:
+  # CWE-89: SQL Injection
+  - id: chakra-cwe-89-sql-injection-concat
+    patterns:
+      - pattern: |
+          $QUERY = $PREFIX + $USERINPUT
+      - pattern-either:
+          - pattern-inside: |
+              def $FUNC(..., $USERINPUT, ...):
+                ...
+          - pattern-inside: |
+              $USERINPUT = request.$METHOD
+              ...
+    message: "CWE-89: Possible SQL injection via string concatenation. Use parameterized queries instead."
+    languages: [python]
+    severity: ERROR
+    metadata:
+      cwe: CWE-89
+      chakra_severity: HIGH
+
+  - id: chakra-cwe-89-sql-format
+    pattern: |
+      $DB.execute("..." % $VAR)
+    message: "CWE-89: SQL query built with % string formatting. Use parameterized queries."
+    languages: [python]
+    severity: ERROR
+    metadata:
+      cwe: CWE-89
+      chakra_severity: HIGH
+
+  - id: chakra-cwe-89-sql-fstring
+    pattern: |
+      $DB.execute(f"...{$VAR}...")
+    message: "CWE-89: SQL query built with f-string interpolation. Use parameterized queries."
+    languages: [python]
+    severity: ERROR
+    metadata:
+      cwe: CWE-89
+      chakra_severity: HIGH
+
+  - id: chakra-cwe-89-sql-format-method
+    pattern: |
+      $DB.execute("...".format(...))
+    message: "CWE-89: SQL query built with .format(). Use parameterized queries."
+    languages: [python]
+    severity: ERROR
+    metadata:
+      cwe: CWE-89
+      chakra_severity: HIGH
+
+  # CWE-78: OS Command Injection
+  - id: chakra-cwe-78-os-system
+    pattern: os.system($CMD + $VAR)
+    message: "CWE-78: OS command injection via os.system with string concatenation."
+    languages: [python]
+    severity: ERROR
+    metadata:
+      cwe: CWE-78
+      chakra_severity: HIGH
+
+  - id: chakra-cwe-78-subprocess-shell
+    patterns:
+      - pattern: subprocess.run($CMD, ..., shell=True, ...)
+      - pattern-not: subprocess.run([...], ..., shell=True, ...)
+    message: "CWE-78: Command injection risk — subprocess.run with shell=True and a non-list command."
+    languages: [python]
+    severity: ERROR
+    metadata:
+      cwe: CWE-78
+      chakra_severity: HIGH
+
+  - id: chakra-cwe-78-subprocess-call-shell
+    patterns:
+      - pattern: subprocess.call($CMD, ..., shell=True, ...)
+      - pattern-not: subprocess.call([...], ..., shell=True, ...)
+    message: "CWE-78: Command injection risk — subprocess.call with shell=True and a non-list command."
+    languages: [python]
+    severity: ERROR
+    metadata:
+      cwe: CWE-78
+      chakra_severity: HIGH
+
+  - id: chakra-cwe-78-popen-shell
+    patterns:
+      - pattern: subprocess.Popen($CMD, ..., shell=True, ...)
+      - pattern-not: subprocess.Popen([...], ..., shell=True, ...)
+    message: "CWE-78: Command injection risk — subprocess.Popen with shell=True and a non-list command."
+    languages: [python]
+    severity: ERROR
+    metadata:
+      cwe: CWE-78
+      chakra_severity: HIGH
+
+  - id: chakra-cwe-78-os-popen
+    pattern: os.popen($CMD)
+    message: "CWE-78: os.popen executes shell commands. Use subprocess with a list of arguments instead."
+    languages: [python]
+    severity: ERROR
+    metadata:
+      cwe: CWE-78
+      chakra_severity: HIGH
+
+  # CWE-502: Insecure Deserialization
+  - id: chakra-cwe-502-pickle-loads
+    pattern: pickle.loads($DATA)
+    message: "CWE-502: pickle.loads() on untrusted data allows arbitrary code execution."
+    languages: [python]
+    severity: ERROR
+    metadata:
+      cwe: CWE-502
+      chakra_severity: HIGH
+
+  - id: chakra-cwe-502-pickle-load
+    pattern: pickle.load($FILE)
+    message: "CWE-502: pickle.load() on untrusted data allows arbitrary code execution."
+    languages: [python]
+    severity: ERROR
+    metadata:
+      cwe: CWE-502
+      chakra_severity: HIGH
+
+  - id: chakra-cwe-502-yaml-load
+    pattern: yaml.load($DATA)
+    message: "CWE-502: yaml.load() without Loader is unsafe. Use yaml.safe_load() instead."
+    languages: [python]
+    severity: WARNING
+    metadata:
+      cwe: CWE-502
+      chakra_severity: MEDIUM
+
+  # CWE-95: Code Injection (eval/exec)
+  - id: chakra-cwe-95-eval
+    pattern: eval($VAR)
+    message: "CWE-95: eval() on dynamic input allows arbitrary code execution."
+    languages: [python]
+    severity: ERROR
+    metadata:
+      cwe: CWE-95
+      chakra_severity: HIGH
+
+  - id: chakra-cwe-95-exec
+    pattern: exec($VAR)
+    message: "CWE-95: exec() on dynamic input allows arbitrary code execution."
+    languages: [python]
+    severity: ERROR
+    metadata:
+      cwe: CWE-95
+      chakra_severity: HIGH
+
+  # CWE-798: Hardcoded Credentials
+  - id: chakra-cwe-798-hardcoded-password
+    pattern-either:
+      - pattern: password = "$VALUE"
+      - pattern: passwd = "$VALUE"
+      - pattern: pwd = "$VALUE"
+      - pattern: secret = "$VALUE"
+      - pattern: secret_key = "$VALUE"
+      - pattern: api_key = "$VALUE"
+      - pattern: token = "$VALUE"
+      - pattern: auth_token = "$VALUE"
+    message: "CWE-798: Hardcoded credential detected. Move to environment variables or a secrets manager."
+    languages: [python]
+    severity: WARNING
+    metadata:
+      cwe: CWE-798
+      chakra_severity: HIGH
+
+  - id: chakra-cwe-798-hardcoded-password-upper
+    pattern-either:
+      - pattern: PASSWORD = "$VALUE"
+      - pattern: SECRET = "$VALUE"
+      - pattern: SECRET_KEY = "$VALUE"
+      - pattern: API_KEY = "$VALUE"
+      - pattern: TOKEN = "$VALUE"
+    message: "CWE-798: Hardcoded credential in constant. Move to environment variables."
+    languages: [python]
+    severity: WARNING
+    metadata:
+      cwe: CWE-798
+      chakra_severity: HIGH
+
+  # CWE-328: Weak Cryptographic Hash
+  - id: chakra-cwe-328-md5
+    pattern-either:
+      - pattern: hashlib.md5(...)
+      - pattern: hashlib.new("md5", ...)
+    message: "CWE-328: MD5 is a weak hash algorithm. Use hashlib.sha256() or stronger."
+    languages: [python]
+    severity: WARNING
+    metadata:
+      cwe: CWE-328
+      chakra_severity: MEDIUM
+
+  - id: chakra-cwe-328-sha1
+    pattern-either:
+      - pattern: hashlib.sha1(...)
+      - pattern: hashlib.new("sha1", ...)
+    message: "CWE-328: SHA1 is a weak hash algorithm. Use hashlib.sha256() or stronger."
+    languages: [python]
+    severity: WARNING
+    metadata:
+      cwe: CWE-328
+      chakra_severity: MEDIUM
+
+  # CWE-338: Insecure Randomness
+  - id: chakra-cwe-338-random-randint
+    pattern: random.randint(...)
+    message: "CWE-338: random.randint() is not cryptographically secure. Use secrets.randbelow() for security-sensitive values."
+    languages: [python]
+    severity: WARNING
+    metadata:
+      cwe: CWE-338
+      chakra_severity: MEDIUM
+
+  - id: chakra-cwe-338-random-random
+    pattern: random.random()
+    message: "CWE-338: random.random() is not cryptographically secure. Use secrets module for tokens or keys."
+    languages: [python]
+    severity: WARNING
+    metadata:
+      cwe: CWE-338
+      chakra_severity: MEDIUM
+
+  - id: chakra-cwe-338-random-choice
+    pattern: random.choice($SEQ)
+    message: "CWE-338: random.choice() is not cryptographically secure. Use secrets.choice() for security-sensitive selections."
+    languages: [python]
+    severity: WARNING
+    metadata:
+      cwe: CWE-338
+      chakra_severity: MEDIUM
+
+  # CWE-22: Path Traversal
+  - id: chakra-cwe-22-open-traversal
+    patterns:
+      - pattern: open($PATH + $VAR, ...)
+    message: "CWE-22: Possible path traversal — user input concatenated into file path. Validate and sanitize path inputs."
+    languages: [python]
+    severity: ERROR
+    metadata:
+      cwe: CWE-22
+      chakra_severity: HIGH
+
+  - id: chakra-cwe-22-os-path-join-traversal
+    patterns:
+      - pattern: os.path.join($BASE, $VAR)
+      - pattern-inside: |
+          def $FUNC(..., $VAR, ...):
+            ...
+    message: "CWE-22: os.path.join with user-controlled input may allow path traversal. Validate input against an allowlist."
+    languages: [python]
+    severity: WARNING
+    metadata:
+      cwe: CWE-22
+      chakra_severity: MEDIUM
+
+  - id: chakra-cwe-22-send-file
+    pattern: send_file($VAR)
+    message: "CWE-22: send_file() with dynamic path input may allow path traversal attacks."
+    languages: [python]
+    severity: ERROR
+    metadata:
+      cwe: CWE-22
+      chakra_severity: HIGH

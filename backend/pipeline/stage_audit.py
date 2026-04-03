@@ -28,12 +28,10 @@ SCOUT_CWE_MAP = {
 
 def _run_semgrep(filepath: str) -> list:
     """Runs Semgrep natively with an atomic lock binding to limit resource scaling issues."""
-    rule_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "rules", "chakra_rules.yaml")
-    
     with SEMGREP_LOCK:
         try:
             result = subprocess.run(
-                ["semgrep", "--config", rule_path, "--json", filepath],
+                ["semgrep", "--config", "p/python", "--json", filepath],
                 capture_output=True,
                 text=True
             )
