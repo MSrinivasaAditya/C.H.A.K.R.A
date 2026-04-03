@@ -12,12 +12,12 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from typing import Dict, Any, List
 from dotenv import load_dotenv
 
-from backend.db.state_manager import StateManager
-from backend.delta import compute_fingerprints, compute_changed_range
-from backend.pipeline.stage_scout import run_scout
-from backend.pipeline.stage_audit import run_audit
-from backend.pipeline.stage_remediate import run_remediate
-from backend.llm.llm_client import LLMClient
+from db.state_manager import StateManager
+from delta import compute_fingerprints, compute_changed_range
+from pipeline.stage_scout import run_scout
+from pipeline.stage_audit import run_audit
+from pipeline.stage_remediate import run_remediate
+from llm.llm_client import LLMClient
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -284,6 +284,14 @@ def cleanup_worker():
             pass
 
 class ChakraHTTPRequestHandler(BaseHTTPRequestHandler):
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def check_auth(self):
         if not AUTH_TOKEN: return True
         parsed_path = urlparse(self.path).path
@@ -293,6 +301,7 @@ class ChakraHTTPRequestHandler(BaseHTTPRequestHandler):
         if auth_header != f"Bearer {AUTH_TOKEN}":
             self.send_response(401)
             self.send_header('Content-Type', 'application/json')
+            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(b'{"error": "Unauthorized"}')
             return False
@@ -312,10 +321,12 @@ class ChakraHTTPRequestHandler(BaseHTTPRequestHandler):
                     content = f.read()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html")
+                self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
                 self.wfile.write(content)
             except FileNotFoundError:
                 self.send_response(404)
+                self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
                 self.wfile.write(b"Dashboard not found")
             return
@@ -326,6 +337,7 @@ class ChakraHTTPRequestHandler(BaseHTTPRequestHandler):
                 scan_id = int(scan_id_str)
             except:
                 self.send_response(400)
+                self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
                 return
 
@@ -337,6 +349,7 @@ class ChakraHTTPRequestHandler(BaseHTTPRequestHandler):
                 
             if not row:
                 self.send_response(404)
+                self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
                 return
                 
@@ -349,6 +362,7 @@ class ChakraHTTPRequestHandler(BaseHTTPRequestHandler):
                     
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps(res).encode())
             return
@@ -359,6 +373,7 @@ class ChakraHTTPRequestHandler(BaseHTTPRequestHandler):
             findings = db.get_org_findings(org_id)
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps(findings).encode())
             return
@@ -369,11 +384,13 @@ class ChakraHTTPRequestHandler(BaseHTTPRequestHandler):
             stats = db.get_org_stats(org_id)
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps(stats).encode())
             return
 
         self.send_response(404)
+        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
 
     def do_POST(self):
@@ -390,6 +407,7 @@ class ChakraHTTPRequestHandler(BaseHTTPRequestHandler):
             except json.JSONDecodeError:
                 self.send_response(400)
                 self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
                 self.wfile.write(b'{"error": "Invalid JSON"}')
                 return
@@ -405,6 +423,7 @@ class ChakraHTTPRequestHandler(BaseHTTPRequestHandler):
                 if filepath.startswith("/") or ":\\" in filepath:
                     self.send_response(400)
                     self.send_header("Content-Type", "application/json")
+                    self.send_header("Access-Control-Allow-Origin", "*")
                     self.end_headers()
                     self.wfile.write(b'{"error": "Absolute paths not supported in server mode."}')
                     return
@@ -413,6 +432,7 @@ class ChakraHTTPRequestHandler(BaseHTTPRequestHandler):
                 self.send_response(429)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Retry-After", "30")
+                self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
                 self.wfile.write(b'{"error": "Rate limit exceeded. Retry in 30 seconds."}')
                 return
@@ -426,6 +446,7 @@ class ChakraHTTPRequestHandler(BaseHTTPRequestHandler):
                 self.send_response(429)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Retry-After", "10")
+                self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
                 self.wfile.write(b'{"error": "Queue full. Retry in 10 seconds."}')
                 return
@@ -433,6 +454,7 @@ class ChakraHTTPRequestHandler(BaseHTTPRequestHandler):
             payload = response_q.get()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps(payload).encode())
             return
@@ -441,6 +463,7 @@ class ChakraHTTPRequestHandler(BaseHTTPRequestHandler):
             res = handle_dismiss(data)
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps(res).encode())
             return
@@ -449,11 +472,13 @@ class ChakraHTTPRequestHandler(BaseHTTPRequestHandler):
             res = handle_repo_scan(data)
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps(res).encode())
             return
 
         self.send_response(404)
+        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
 
 def run_server():
