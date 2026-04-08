@@ -27,6 +27,8 @@ SCOUT_CWE_MAP = {
     "insecure_random": "CWE-330"
 }
 
+SEVERITY_ORDER = {"HIGH": 0, "MEDIUM": 1, "LOW": 2, "ERROR": 0, "WARNING": 1, "INFO": 2}
+
 def _run_semgrep(filepath: str, source_code: str) -> list:
     """Runs Semgrep natively with an atomic lock binding to limit resource scaling issues.
     
@@ -90,9 +92,16 @@ def _extract_cwe_from_semgrep(sg: dict) -> str:
     return "CWE-Unknown"
 
 def _map_semgrep_severity(sg: dict) -> str:
-    sev = sg.get("extra", {}).get("severity", "INFO").upper()
+    """Maps Semgrep severity (ERROR/WARNING/INFO) to CHAKRA severity (HIGH/MEDIUM/LOW).
+    Always returns a string — never a number."""
+    chakra_sev = sg.get("extra", {}).get("metadata", {}).get("chakra_severity")
+    if chakra_sev:
+        return str(chakra_sev).upper()
+        
+    raw = sg.get("extra", {}).get("severity", "INFO")
+    sev = str(raw).upper()
     if sev == "ERROR": return "HIGH"
-    elif sev == "WARNING": return "MEDIUM"
+    if sev == "WARNING": return "MEDIUM"
     return "LOW"
 
 def _get_abstract_type(chk: str) -> str:
@@ -128,15 +137,18 @@ def run_audit(scout_output: dict, source_code: str, filepath: str) -> list:
         sev = _map_semgrep_severity(sg)
         check_id = sg.get("check_id", "unknown")
         
+        is_chakra_high = str(sg.get("extra", {}).get("metadata", {}).get("chakra_severity", "")).upper() == "HIGH"
+        
         combined.append({
             "source": "semgrep",
             "check_id": check_id,
             "abstract_type": _get_abstract_type(check_id),
             "line_number": line_num,
-            "severity": sev,
+            "severity": str(sev).upper(),
             "cwe": cwe,
             "message": sg.get("extra", {}).get("message", ""),
-            "snippet": sg.get("extra", {}).get("lines", "").strip()
+            "snippet": sg.get("extra", {}).get("lines", "").strip(),
+            "_high_confidence": is_chakra_high
         })
         
     # Translate Scout payload
@@ -152,7 +164,8 @@ def run_audit(scout_output: dict, source_code: str, filepath: str) -> list:
             "severity": "LOW",  
             "cwe": SCOUT_CWE_MAP.get(ptype, "CWE-Unknown"),
             "message": f"Structural detection of {ptype}",
-            "snippet": sp.get("source_snippet", "")
+            "snippet": sp.get("source_snippet", ""),
+            "_high_confidence": False
         })
         
     # Deduplicate via line bounds and mapped overlap types
@@ -166,74 +179,80 @@ def run_audit(scout_output: dict, source_code: str, filepath: str) -> list:
     unique_findings = []
     for key, items in dedup_map.items():
         # Instruction dictates preferring Semgrep's metadata representation naturally over Scout
-        items.sort(key=lambda x: 1 if x["source"] == "semgrep" else 0, reverse=True)
+        items.sort(key=lambda x: SEVERITY_ORDER.get(str(x.get("severity", "LOW")).upper(), 99))
         unique_findings.append(items[0])
         
-    # Priority sorting logic: High > Low; Semgrep > Scout
-    def sort_rank(f):
-        score = 0
-        if f["severity"] == "HIGH": score += 30
-        elif f["severity"] == "MEDIUM": score += 20
-        elif f["severity"] == "LOW": score += 10
-        
-        if f["source"] == "semgrep": score += 5
-        return score
-        
-    unique_findings.sort(key=sort_rank, reverse=True)
+    unique_findings.sort(key=lambda x: SEVERITY_ORDER.get(str(x.get("severity", "LOW")).upper(), 99))
     batched_findings = unique_findings[:5] # Enforced batch size limits
     
     if not batched_findings:
         return []
         
-    # Scrub abstract parameters to preserve LLM token context limits
-    for bf in batched_findings:
-        bf.pop("abstract_type", None)
-        
-    llm = LLMClient()
-    system_prompt = (
-        "You are a senior security auditor reviewing preliminary findings from static analysis tools. "
-        "Your job is to determine if each finding is a real vulnerability in context, or a false positive. "
-        "A hardcoded string that is clearly a configuration key name but not a password should be marked as a false positive. "
-        "Return the EXACT same JSON array of findings provided, but with a new boolean field 'confirmed' added to every object. "
-        "Do not change existing fields."
-    )
-    
-    user_context = {
-        "file_summary": scout_output.get("structure_summary", ""),
-        "imports": scout_output.get("imports", []),
-        "findings_to_review": batched_findings
-    }
-    
-    user_prompt = f"Review these findings:\n{json.dumps(user_context, indent=2)}\n\n"
-    
-    try:
-        # Pushes exactly out to the updated 2.3 LLM Client specification with built-in format guards
-        llm_response = llm.complete(system_prompt, user_prompt, expect_json=True)
-    except Exception as e:
-        logger.error(f"Failed to reach LLM during audit phase: {e}")
-        return []
-
+    needs_llm = []
     verified_findings = []
     
-    logger.info(f"[DEBUG] LLM raw response type: {type(llm_response).__name__}, content preview: {json.dumps(llm_response, default=str)[:1000]}")
-    
-    # Re-iterate array structures from LLM back into native application bounds, filtering False Positives
-    if isinstance(llm_response, list):
-        for f in llm_response:
-            if f.get("confirmed") is True:
-                verified_findings.append({
-                    "line_number": f.get("line_number"),
-                    "cwe": f.get("cwe", "CWE-Unknown"),
-                    "severity": f.get("severity", "LOW"),
-                    "check_id": f.get("check_id"),
-                    "snippet": f.get("snippet", ""),
-                    "message": f.get("message", "")
-                })
-    elif isinstance(llm_response, dict) and "error" in llm_response:
-        logger.warning(f"LLM Client encountered an error: {llm_response['error']}")
-        return []
-    
-    logger.info(f"[DEBUG] Audit stage: {len(batched_findings)} findings sent to LLM, {len(verified_findings)} confirmed after filter")
+    # Scrub abstract parameters to preserve LLM token context limits
+    # and separate high confidence findings from ones that need LLM verification
+    for bf in batched_findings:
+        bf.pop("abstract_type", None)
+        is_high_conf = bf.pop("_high_confidence", False)
+        if is_high_conf:
+            verified_findings.append({
+                "line_number": bf.get("line_number"),
+                "cwe": bf.get("cwe", "CWE-Unknown"),
+                "severity": str(bf.get("severity", "LOW")).upper(),
+                "check_id": bf.get("check_id"),
+                "snippet": bf.get("snippet", ""),
+                "message": bf.get("message", "")
+            })
+        else:
+            needs_llm.append(bf)
+            
+    if needs_llm:
+        llm = LLMClient()
+        system_prompt = (
+            "You are a senior security auditor reviewing preliminary findings from static analysis tools. "
+            "Your job is to determine if each finding is a real vulnerability in context, or a false positive. "
+            "A hardcoded string that is clearly a configuration key name but not a password should be marked as a false positive. "
+            "Return the EXACT same JSON array of findings provided, but with a new boolean field 'confirmed' added to every object. "
+            "Do not change existing fields."
+        )
+        
+        user_context = {
+            "file_summary": scout_output.get("structure_summary", ""),
+            "imports": scout_output.get("imports", []),
+            "findings_to_review": needs_llm
+        }
+        
+        user_prompt = f"Review these findings:\n{json.dumps(user_context, indent=2)}\n\n"
+        
+        try:
+            # Pushes exactly out to the updated 2.3 LLM Client specification with built-in format guards
+            llm_response = llm.complete(system_prompt, user_prompt, expect_json=True)
+        except Exception as e:
+            logger.error(f"Failed to reach LLM during audit phase: {e}")
+            return verified_findings
+            
+        logger.info(f"[DEBUG] LLM raw response type: {type(llm_response).__name__}, content preview: {json.dumps(llm_response, default=str)[:1000]}")
+        
+        # Re-iterate array structures from LLM back into native application bounds, filtering False Positives
+        if isinstance(llm_response, list):
+            for f in llm_response:
+                if f.get("confirmed") is True:
+                    verified_findings.append({
+                        "line_number": f.get("line_number"),
+                        "cwe": f.get("cwe", "CWE-Unknown"),
+                        "severity": str(f.get("severity", "LOW")).upper(),
+                        "check_id": f.get("check_id"),
+                        "snippet": f.get("snippet", ""),
+                        "message": f.get("message", "")
+                    })
+        elif isinstance(llm_response, dict) and "error" in llm_response:
+            logger.warning(f"LLM Client encountered an error: {llm_response['error']}")
+            
+    # Sort verified findings by severity for consistency
+    verified_findings.sort(key=lambda x: SEVERITY_ORDER.get(str(x.get("severity", "LOW")).upper(), 99))
+    logger.info(f"[DEBUG] Audit stage: {len(needs_llm)} findings sent to LLM, {len(verified_findings)} confirmed after filter")
     return verified_findings
 
 if __name__ == "__main__":

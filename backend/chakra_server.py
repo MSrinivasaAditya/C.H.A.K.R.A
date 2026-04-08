@@ -11,6 +11,7 @@ from urllib.parse import urlparse, parse_qs
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from typing import Dict, Any, List
 from dotenv import load_dotenv
+import traceback
 
 from db.state_manager import StateManager
 from delta import compute_fingerprints, compute_changed_range
@@ -266,7 +267,11 @@ def scan_worker():
             try:
                 result_payload = handle_scan(filepath, source_code, org_id, dev_id)
             except Exception as e:
-                logger.error(f"Error executing scan: {e}")
+                full_trace = traceback.format_exc()
+                print(full_trace)  # prints to terminal
+                # also write to chakra.log
+                with open("chakra.log", "a") as log:
+                    log.write(full_trace + "\n")
                 result_payload = {"findings": [{"error": str(e)}], "scan_time_ms": 0, "cache_hit": False, "changed_lines": None}
                 
             response_q.put(result_payload)

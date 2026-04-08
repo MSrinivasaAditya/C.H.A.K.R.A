@@ -27,8 +27,10 @@ def run_remediate(confirmed_findings: list, scout_output: dict, source_code: str
     if not confirmed_findings:
         return []
         
+    n_findings = len(confirmed_findings)
     system_prompt = (
-        "You are an expert application security engineer. The user will provide a list of authenticated vulnerabilities. "
+        "You are an expert application security engineer. "
+        f"Here are {n_findings} findings, return a JSON array of {n_findings} enriched findings.\n"
         "Your task is to enrich EVERY finding in the provided JSON array with exactly four new fields:\n"
         "1. 'explanation': Two to three sentences. Explain what is wrong, why it is dangerous, and what class of attacker exploits this.\n"
         "2. 'attack_scenario': One concrete paragraph starting with 'An attacker could send...'. Detail a specific hypothetical attack showing what they send, what they get back, and what damage they cause. No abstractions.\n"
