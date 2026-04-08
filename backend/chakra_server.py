@@ -27,7 +27,9 @@ logger = logging.getLogger(__name__)
 # Log rotation & file-based logging setup
 # ---------------------------------------------------------------------------
 
-LOG_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "chakra.log")
+LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'chakra.log')
+LOG_PATH = os.path.normpath(LOG_PATH)
+
 LOG_MAX_BYTES = 10 * 1024 * 1024  # 10 MB
 
 
@@ -43,17 +45,17 @@ class _ChakraFormatter(logging.Formatter):
 def setup_logging() -> None:
     """Configure file-only logging with log rotation (>10 MB → chakra.log.1)."""
     # Rotate if oversized
-    if os.path.exists(LOG_FILE) and os.path.getsize(LOG_FILE) > LOG_MAX_BYTES:
-        rotated = LOG_FILE + ".1"
+    if os.path.exists(LOG_PATH) and os.path.getsize(LOG_PATH) > LOG_MAX_BYTES:
+        rotated = LOG_PATH + ".1"
         try:
             if os.path.exists(rotated):
                 os.remove(rotated)
-            os.rename(LOG_FILE, rotated)
+            os.rename(LOG_PATH, rotated)
         except OSError as exc:
             # Non-fatal — keep writing to the existing file
             print(f"[CHAKRA] Warning: could not rotate log file: {exc}")
 
-    file_handler = logging.FileHandler(LOG_FILE, encoding="utf-8")
+    file_handler = logging.FileHandler(LOG_PATH, encoding="utf-8")
     file_handler.setFormatter(_ChakraFormatter())
 
     root = logging.getLogger()
@@ -69,6 +71,7 @@ SCAN_QUEUE = queue.Queue(maxsize=10)
 DEPLOYMENT_MODE = os.environ.get("DEPLOYMENT_MODE", "local")
 AUTH_TOKEN = os.environ.get("AUTH_TOKEN")
 PORT = int(os.environ.get("PORT", "7777"))
+DEFAULT_ORG_ID = os.environ.get("DEFAULT_ORG_ID", "default")
 
 # 5.3 Limit map
 DEV_RATE_LIMITS = defaultdict(list)
@@ -300,7 +303,7 @@ class ChakraHTTPRequestHandler(BaseHTTPRequestHandler):
     def check_auth(self):
         if not AUTH_TOKEN: return True
         parsed_path = urlparse(self.path).path
-        if parsed_path == '/dashboard' and self.command == 'GET': return True
+        if parsed_path in ['/dashboard', '/config'] and self.command == 'GET': return True
             
         auth_header = self.headers.get('Authorization')
         if auth_header != f"Bearer {AUTH_TOKEN}":
@@ -372,6 +375,20 @@ class ChakraHTTPRequestHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(res).encode())
             return
             
+        if path == '/config':
+            res = {
+                "default_org_id": DEFAULT_ORG_ID,
+                "default_dev_id": "anon",
+                "auth_enabled": bool(AUTH_TOKEN),
+                "version": "1.0.0"
+            }
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(res).encode())
+            return
+            
         if path == '/findings':
             org_id = query.get("org_id", ["default"])[0]
             db = StateManager()
@@ -423,6 +440,10 @@ class ChakraHTTPRequestHandler(BaseHTTPRequestHandler):
             dev_id = data.get("dev_id", "anon")
             filepath = data.get("filepath", "")
             source = data.get("source", "")
+            
+            org_id = data.get("org_id")
+            if not org_id or str(org_id).strip() == "":
+                data["org_id"] = DEFAULT_ORG_ID
             
             if DEPLOYMENT_MODE == "server":
                 if filepath.startswith("/") or ":\\" in filepath:
@@ -507,7 +528,7 @@ def run_server():
     logger.info(f"Auth Enabled: {bool(AUTH_TOKEN)}")
 
     # Also echo the URL to stdout so the start scripts can report it
-    print(f"C.H.A.K.R.A running at http://{host}:{PORT}  (logs: {LOG_FILE})", flush=True)
+    print(f"C.H.A.K.R.A running at http://{host}:{PORT}  (logs: {LOG_PATH})", flush=True)
 
     server = ThreadingHTTPServer((host, PORT), ChakraHTTPRequestHandler)
     try:

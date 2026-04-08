@@ -191,10 +191,18 @@ def run_scout(source_code: str, filepath: str) -> dict:
     
     unique_imports = list(set([imp["module"].split(".")[0] for imp in imports]))
     
+    def normalize_finding(f):
+        f["severity"] = str(f.get("severity") or f.get("chakra_severity") or "LOW").upper()
+        f["cwe"] = str(f.get("cwe") or f.get("cwe_id") or "CWE-UNKNOWN")
+        f["message"] = str(f.get("message") or f.get("description") or "Security finding detected")
+        f["line"] = int(f.get("line") or f.get("line_number") or 0)
+        return f
+
     seen = set()
     deduped = []
     for dp in dangerous_patterns:
-        sig = (dp["pattern_type"], dp["line_number"])
+        dp = normalize_finding(dp)
+        sig = (dp["pattern_type"], dp.get("line_number", 0))
         if sig not in seen:
             seen.add(sig)
             deduped.append(dp)

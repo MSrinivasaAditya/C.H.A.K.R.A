@@ -19,6 +19,13 @@ def _generate_fingerprint(filepath: str, cwe_id: str, original_line: str) -> str
     payload = f"{norm_path}{cwe_id}{line_stripped}"
     return hashlib.sha256(payload.encode('utf-8')).hexdigest()
 
+def normalize_finding(f):
+    f["severity"] = str(f.get("severity") or f.get("chakra_severity") or "LOW").upper()
+    f["cwe"] = str(f.get("cwe") or f.get("cwe_id") or "CWE-UNKNOWN")
+    f["message"] = str(f.get("message") or f.get("description") or "Security finding detected")
+    f["line"] = int(f.get("line") or f.get("line_number") or 0)
+    return f
+
 def run_remediate(confirmed_findings: list, scout_output: dict, source_code: str, llm_client) -> list:
     """
     Takes confirmed findings, relies on the LLMClient for formatting an exact 4-metric schema,
@@ -27,40 +34,43 @@ def run_remediate(confirmed_findings: list, scout_output: dict, source_code: str
     if not confirmed_findings:
         return []
         
-    n_findings = len(confirmed_findings)
     system_prompt = (
         "You are an expert application security engineer. "
-        f"Here are {n_findings} findings, return a JSON array of {n_findings} enriched findings.\n"
-        "Your task is to enrich EVERY finding in the provided JSON array with exactly four new fields:\n"
+        "Your task is to enrich the provided finding with exactly four new fields:\n"
         "1. 'explanation': Two to three sentences. Explain what is wrong, why it is dangerous, and what class of attacker exploits this.\n"
         "2. 'attack_scenario': One concrete paragraph starting with 'An attacker could send...'. Detail a specific hypothetical attack showing what they send, what they get back, and what damage they cause. No abstractions.\n"
         "3. 'fix_diff': A JSON object containing exactly two keys: 'original_lines' (the vulnerable code exactly as it appears in the file) and 'fixed_lines' (the minimal replacement that resolves the vulnerability without changing surrounding logic, preserving exact indentation).\n"
         "4. 'future_guidance': One to two sentences answering: 'If this developer's roadmap requires extending this code, what is the safe way to do it without reintroducing the vulnerability?'\n"
         "\n"
-        "Return the EXACT same JSON array provided, modified to include these four fields for each finding. "
+        "Return the EXACT same JSON object provided, modified to include these four fields. "
         "Do not alter existing IDs or structure. Respond only with valid JSON. No preamble, no markdown fences, no explanation outside the JSON structure."
     )
     
-    user_context = {
-        "file_summary": scout_output.get("structure_summary", ""),
-        "findings_to_enrich": confirmed_findings,
-        "source_code_context": source_code
-    }
-    
-    user_prompt = f"Please enrich these findings:\n{json.dumps(user_context, indent=2)}\n\n"
-    
-    try:
-        enriched_response = llm_client.complete(system_prompt, user_prompt, expect_json=True)
-    except Exception as e:
-        logger.error(f"Failed to reach LLM during remediation phase: {e}")
-        return []
-        
-    if not isinstance(enriched_response, list):
-        if isinstance(enriched_response, dict) and "error" in enriched_response:
-            logger.warning(f"LLM Client encountered an error: {enriched_response['error']}")
-        else:
-            logger.warning("LLM returned malformed structure during remediate batch, expected an array.")
-        return []
+    def build_prompt_for_one(finding):
+        user_context = {
+            "file_summary": scout_output.get("structure_summary", ""),
+            "finding_to_enrich": finding,
+            "source_code_context": source_code
+        }
+        return f"Please enrich this finding:\n{json.dumps(user_context, indent=2)}\n\n"
+
+    enriched_response = []
+    for finding in confirmed_findings:
+        try:
+            result = llm_client.complete(system_prompt, build_prompt_for_one(finding), expect_json=True)
+            if isinstance(result, dict) and "error" not in result:
+                finding.update(result)
+            else:
+                logger.error(f"LLM returned error or invalid format: {result}")
+                raise Exception("LLM returned error or invalid format")
+        except Exception as e:
+            logger.error(f"Failed to reach LLM during remediation phase: {e}")
+            finding["explanation"] = "Automated analysis timed out. Manual review required."
+            finding["attack_scenario"] = "An attacker could exploit this vulnerability. Manual review required."
+            finding["fix_diff"] = {"original_lines": finding.get("snippet", ""), "fixed_lines": "# Apply security fix here"}
+            finding["future_guidance"] = "If your roadmap requires extending this code, consult security documentation for this CWE."
+            
+        enriched_response.append(finding)
 
     # Map state manager explicitly natively since it's just Python bindings to Local DB
     db = StateManager()
@@ -69,7 +79,8 @@ def run_remediate(confirmed_findings: list, scout_output: dict, source_code: str
     lines = source_code.split("\n")
     
     for finding in enriched_response:
-        line_num = finding.get("line_number", 0)
+        finding = normalize_finding(finding)
+        line_num = finding.get("line_number", finding.get("line", 0))
         cwe_id = finding.get("cwe", "CWE-Unknown")
         filepath = finding.get("path") or scout_output.get("filepath") or scout_output.get("file") or "unknown_file.py"
         

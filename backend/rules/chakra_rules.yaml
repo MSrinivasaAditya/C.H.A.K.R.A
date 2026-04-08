@@ -262,3 +262,30 @@ rules:
     metadata:
       cwe: CWE-22
       chakra_severity: HIGH
+
+  - id: chakra-cwe-798-simple-password
+    pattern-regex: '(password|passwd|secret|api_key|token)\s*=\s*["\'][^"'']{4,}["\']'
+    message: "CWE-798: Hardcoded credential detected."
+    languages: [python]
+    severity: WARNING
+    metadata:
+      cwe: CWE-798
+      chakra_severity: HIGH
+
+  - id: chakra-cwe-95-eval-simple
+    pattern: eval(...)
+    message: "CWE-95: eval() usage detected."
+    languages: [python]
+    severity: ERROR
+    metadata:
+      cwe: CWE-95
+      chakra_severity: HIGH
+
+  - id: chakra-cwe-502-pickle-simple
+    pattern: pickle.loads(...)
+    message: "CWE-502: pickle.loads() detected."
+    languages: [python]
+    severity: ERROR
+    metadata:
+      cwe: CWE-502
+      chakra_severity: HIGH

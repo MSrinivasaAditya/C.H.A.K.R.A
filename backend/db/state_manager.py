@@ -6,7 +6,8 @@ from pathlib import Path
 from collections import OrderedDict
 
 # The single database configuration
-DB_PATH = os.environ.get("CHAKRA_DB_PATH", "chakra_state.db")
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'chakra_state.db')
+DB_PATH = os.path.normpath(DB_PATH)
 
 class StateManager:
     """
@@ -105,7 +106,7 @@ class StateManager:
             cursor.execute("SELECT filepath, org_id, dev_id, fingerprint_json FROM file_fingerprints")
             for row in cursor.fetchall():
                 key = (row['filepath'], row['org_id'], row['dev_id'])
-                self._fingerprints_cache[key] = json.loads(row['fingerprint_json'])
+                self._fingerprints_cache[key] = {int(k): v for k, v in json.loads(row['fingerprint_json']).items()}
                 
             cursor.execute("SELECT filepath, org_id, dev_id, findings_json FROM findings_cache")
             for row in cursor.fetchall():
@@ -128,7 +129,7 @@ class StateManager:
             )
             row = cursor.fetchone()
             if row:
-                data = json.loads(row['fingerprint_json'])
+                data = {int(k): v for k, v in json.loads(row['fingerprint_json']).items()}
                 self._fingerprints_cache[key] = data
                 self.evict_lru_if_needed()
                 return data

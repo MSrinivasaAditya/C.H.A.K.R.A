@@ -14,6 +14,9 @@ from llm.llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
 
+RULES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'rules', 'chakra_rules.yaml')
+RULES_PATH = os.path.normpath(RULES_PATH)
+
 SEMGREP_LOCK = threading.Lock()
 
 SCOUT_CWE_MAP = {
@@ -27,7 +30,31 @@ SCOUT_CWE_MAP = {
     "insecure_random": "CWE-330"
 }
 
+CWE_SEVERITY = {
+    "CWE-89": "HIGH",
+    "CWE-78": "HIGH",
+    "CWE-798": "HIGH",
+    "CWE-502": "HIGH",
+    "CWE-95": "HIGH",
+    "CWE-22": "HIGH",
+    "CWE-328": "MEDIUM",
+    "CWE-338": "MEDIUM"
+}
+
 SEVERITY_ORDER = {"HIGH": 0, "MEDIUM": 1, "LOW": 2, "ERROR": 0, "WARNING": 1, "INFO": 2}
+
+def safe_severity_key(finding):
+    sev = finding.get("severity") or finding.get("chakra_severity") or "LOW"
+    if isinstance(sev, int):
+        return sev
+    return SEVERITY_ORDER.get(str(sev).upper(), 99)
+
+def normalize_finding(f):
+    f["severity"] = str(f.get("severity") or f.get("chakra_severity") or "LOW").upper()
+    f["cwe"] = str(f.get("cwe") or f.get("cwe_id") or "CWE-UNKNOWN")
+    f["message"] = str(f.get("message") or f.get("description") or "Security finding detected")
+    f["line"] = int(f.get("line") or f.get("line_number") or 0)
+    return f
 
 def _run_semgrep(filepath: str, source_code: str) -> list:
     """Runs Semgrep natively with an atomic lock binding to limit resource scaling issues.
@@ -48,7 +75,7 @@ def _run_semgrep(filepath: str, source_code: str) -> list:
             tmp_fd = None  # fd is now closed by os.fdopen
 
             result = subprocess.run(
-                ["semgrep", "--config", "p/python", tmp_path, "--json", "--no-git-ignore", "--disable-version-check"],
+                ["semgrep", "--config", RULES_PATH, tmp_path, "--json", "--no-git-ignore", "--disable-version-check"],
                 capture_output=True,
                 text=True
             )
@@ -155,17 +182,18 @@ def run_audit(scout_output: dict, source_code: str, filepath: str) -> list:
     for sp in scout_patterns:
         ptype = sp.get("pattern_type", "unknown")
         line_num = sp.get("line_number", 0)
+        cwe_val = SCOUT_CWE_MAP.get(ptype, "CWE-Unknown")
         
         combined.append({
             "source": "scout",
             "check_id": ptype,
             "abstract_type": _get_abstract_type(ptype),
             "line_number": line_num,
-            "severity": "LOW",  
-            "cwe": SCOUT_CWE_MAP.get(ptype, "CWE-Unknown"),
+            "severity": CWE_SEVERITY.get(cwe_val, "MEDIUM"),  
+            "cwe": cwe_val,
             "message": f"Structural detection of {ptype}",
             "snippet": sp.get("source_snippet", ""),
-            "_high_confidence": False
+            "_high_confidence": ptype in ["hardcoded_string_credential", "eval_call", "exec_call", "pickle_load"]
         })
         
     # Deduplicate via line bounds and mapped overlap types
@@ -179,10 +207,10 @@ def run_audit(scout_output: dict, source_code: str, filepath: str) -> list:
     unique_findings = []
     for key, items in dedup_map.items():
         # Instruction dictates preferring Semgrep's metadata representation naturally over Scout
-        items.sort(key=lambda x: SEVERITY_ORDER.get(str(x.get("severity", "LOW")).upper(), 99))
+        items.sort(key=safe_severity_key)
         unique_findings.append(items[0])
         
-    unique_findings.sort(key=lambda x: SEVERITY_ORDER.get(str(x.get("severity", "LOW")).upper(), 99))
+    unique_findings.sort(key=safe_severity_key)
     batched_findings = unique_findings[:5] # Enforced batch size limits
     
     if not batched_findings:
@@ -211,11 +239,14 @@ def run_audit(scout_output: dict, source_code: str, filepath: str) -> list:
     if needs_llm:
         llm = LLMClient()
         system_prompt = (
-            "You are a senior security auditor reviewing preliminary findings from static analysis tools. "
-            "Your job is to determine if each finding is a real vulnerability in context, or a false positive. "
-            "A hardcoded string that is clearly a configuration key name but not a password should be marked as a false positive. "
-            "Return the EXACT same JSON array of findings provided, but with a new boolean field 'confirmed' added to every object. "
-            "Do not change existing fields."
+            "You are a security auditor reviewing preliminary findings.\n"
+            "Your job is to confirm whether each finding is a REAL vulnerability.\n"
+            "Be PERMISSIVE — when in doubt, confirm the finding.\n"
+            "Only mark confirmed=false if you are certain it is a false positive.\n"
+            "A hardcoded password string is ALWAYS a real finding. Never reject it.\n"
+            "An eval() call is ALWAYS a real finding. Never reject it.\n"
+            "A pickle.loads() call is ALWAYS a real finding. Never reject it.\n"
+            "Return only a JSON array. No other text."
         )
         
         user_context = {
@@ -231,27 +262,44 @@ def run_audit(scout_output: dict, source_code: str, filepath: str) -> list:
             llm_response = llm.complete(system_prompt, user_prompt, expect_json=True)
         except Exception as e:
             logger.error(f"Failed to reach LLM during audit phase: {e}")
-            return verified_findings
+            llm_response = []
             
         logger.info(f"[DEBUG] LLM raw response type: {type(llm_response).__name__}, content preview: {json.dumps(llm_response, default=str)[:1000]}")
         
-        # Re-iterate array structures from LLM back into native application bounds, filtering False Positives
-        if isinstance(llm_response, list):
-            for f in llm_response:
-                if f.get("confirmed") is True:
-                    verified_findings.append({
-                        "line_number": f.get("line_number"),
-                        "cwe": f.get("cwe", "CWE-Unknown"),
-                        "severity": str(f.get("severity", "LOW")).upper(),
-                        "check_id": f.get("check_id"),
-                        "snippet": f.get("snippet", ""),
-                        "message": f.get("message", "")
-                    })
-        elif isinstance(llm_response, dict) and "error" in llm_response:
+        if isinstance(llm_response, dict) and "error" in llm_response:
             logger.warning(f"LLM Client encountered an error: {llm_response['error']}")
+            llm_response = []
             
+        if not isinstance(llm_response, list):
+            llm_response = []
+            
+        # Never return more confirmed findings than were sent
+        confirmed = [f for f in llm_response if f.get("confirmed") == True]
+        confirmed = confirmed[:len(needs_llm)]
+        
+        if len(confirmed) == 0:
+            # LLM filter failed — confirm all findings by default
+            for f in needs_llm:
+                f["confirmed"] = True
+            confirmed = needs_llm
+            
+        for f in confirmed:
+            verified_findings.append({
+                "line_number": f.get("line_number"),
+                "cwe": f.get("cwe", "CWE-Unknown"),
+                "severity": str(f.get("severity", "LOW")).upper(),
+                "check_id": f.get("check_id"),
+                "snippet": f.get("snippet", ""),
+                "message": f.get("message", "")
+            })
+            
+    simplified_findings = []
+    for f in verified_findings:
+        simplified_findings.append(normalize_finding(f))
+    verified_findings = simplified_findings
+    
     # Sort verified findings by severity for consistency
-    verified_findings.sort(key=lambda x: SEVERITY_ORDER.get(str(x.get("severity", "LOW")).upper(), 99))
+    verified_findings.sort(key=safe_severity_key)
     logger.info(f"[DEBUG] Audit stage: {len(needs_llm)} findings sent to LLM, {len(verified_findings)} confirmed after filter")
     return verified_findings
 

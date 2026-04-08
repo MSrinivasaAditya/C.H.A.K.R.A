@@ -825,7 +825,7 @@
     document.addEventListener("DOMContentLoaded", () => {
         // ── Init localStorage defaults ──
         if (!localStorage.getItem("chakra_server_url")) localStorage.setItem("chakra_server_url", "http://localhost:7777");
-        if (!localStorage.getItem("chakra_org_id")) localStorage.setItem("chakra_org_id", "default");
+        let serverDefaultOrgId = "default";
 
         // ── DOM refs ──
         const serverUrlInput = document.getElementById("server-url");
@@ -855,9 +855,11 @@
 
         // ── Populate settings ──
         serverUrlInput.value = localStorage.getItem("chakra_server_url");
-        orgIdInput.value = localStorage.getItem("chakra_org_id");
         tokenInput.value = localStorage.getItem("chakra_auth_token") || "";
-        orgIdDisplay.textContent = "Org: " + orgIdInput.value;
+        if (localStorage.getItem("chakra_org_id")) {
+            orgIdInput.value = localStorage.getItem("chakra_org_id");
+            orgIdDisplay.textContent = "Org: " + orgIdInput.value;
+        }
 
         // ── Navigation ──
         const navItems = document.querySelectorAll(".nav-item[data-section]");
@@ -1197,8 +1199,29 @@
         }
 
         // ── Initial load & polling ──
-        loadDashboardData();
-        setInterval(loadDashboardData, 30000);
+        async function initDashboard() {
+            try {
+                const res = await fetch(`${getServerUrl()}/config`, { headers: getAuthHeaders() });
+                if (res.ok) {
+                    const cfg = await res.json();
+                    serverDefaultOrgId = cfg.default_org_id || "default";
+                }
+            } catch (e) {
+                console.warn("Config fetch failed, using fallback:", e);
+                serverDefaultOrgId = "default";
+            }
+
+            if (!localStorage.getItem("chakra_org_id")) {
+                localStorage.setItem("chakra_org_id", serverDefaultOrgId);
+                orgIdInput.value = serverDefaultOrgId;
+                orgIdDisplay.textContent = "Org: " + serverDefaultOrgId;
+            }
+
+            loadDashboardData();
+            setInterval(loadDashboardData, 30000);
+        }
+
+        initDashboard();
     });
     </script>
 </body>

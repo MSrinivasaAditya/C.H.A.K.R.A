@@ -21,7 +21,7 @@ def compute_fingerprints(source_code: str) -> dict:
             line_hash = hashlib.sha256(line.encode('utf-8')).hexdigest()
             fingerprints[idx] = line_hash[:16]
             
-    return fingerprints
+    return {int(line_num): hash_val for line_num, hash_val in fingerprints.items()}
 
 def compute_changed_range(old_fingerprints: dict, new_fingerprints: dict) -> tuple:
     """
@@ -31,6 +31,8 @@ def compute_changed_range(old_fingerprints: dict, new_fingerprints: dict) -> tup
     Returns a tuple of (start_line, end_line) representing the padded range.
     If no lines differ, returns None.
     """
+    old_fingerprints = {int(k): v for k, v in old_fingerprints.items()}
+    new_fingerprints = {int(k): v for k, v in new_fingerprints.items()}
     changed_lines = []
     
     all_line_numbers = set(old_fingerprints.keys()).union(set(new_fingerprints.keys()))

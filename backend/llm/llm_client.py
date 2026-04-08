@@ -3,11 +3,15 @@ import requests
 import anthropic
 import json
 import logging
+import time
 from dotenv import load_dotenv
 
 # Load environment variables from .env if present
 load_dotenv()
 logger = logging.getLogger(__name__)
+
+OLLAMA_AVAILABLE = True
+OLLAMA_LAST_FAILURE_TIME = 0
 
 class LLMClient:
     """
@@ -67,13 +71,20 @@ class LLMClient:
                 messages=[
                     {"role": "user", "content": user_prompt}
                 ],
-                timeout=60.0
+                timeout=120.0
             )
             return response.content[0].text
         except Exception as e:
             return {"error": f"Network Error (Anthropic): {str(e)}"}
 
     def _complete_ollama(self, system_prompt: str, user_prompt: str):
+        global OLLAMA_AVAILABLE, OLLAMA_LAST_FAILURE_TIME
+        if not OLLAMA_AVAILABLE:
+            if time.time() - OLLAMA_LAST_FAILURE_TIME > 300:
+                OLLAMA_AVAILABLE = True
+            else:
+                return {"error": "Ollama is currently unavailable. Skipping LLM call."}
+        
         url = f"{self.ollama_host}/api/generate"
         
         # Concatenation of system and user prompts with a clear separator
@@ -86,10 +97,13 @@ class LLMClient:
         }
         
         try:
-            response = requests.post(url, json=payload, timeout=60.0)
+            response = requests.post(url, json=payload, timeout=180.0)
             response.raise_for_status()
             return response.json().get("response", "")
         except Exception as e:
+            logger.warning(f"Ollama failed: {e}. Disabling for 5 minutes.")
+            OLLAMA_AVAILABLE = False
+            OLLAMA_LAST_FAILURE_TIME = time.time()
             return {"error": f"Network Error (Ollama): {str(e)}"}
 
     def _parse_json(self, text: str):
