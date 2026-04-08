@@ -4,6 +4,7 @@ import json
 import logging
 import threading
 import subprocess
+import tempfile
 
 backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if backend_dir not in sys.path:
@@ -26,12 +27,26 @@ SCOUT_CWE_MAP = {
     "insecure_random": "CWE-330"
 }
 
-def _run_semgrep(filepath: str) -> list:
-    """Runs Semgrep natively with an atomic lock binding to limit resource scaling issues."""
+def _run_semgrep(filepath: str, source_code: str) -> list:
+    """Runs Semgrep natively with an atomic lock binding to limit resource scaling issues.
+    
+    Writes source_code to a temp file on disk because Semgrep cannot scan
+    strings passed via stdin in --json mode. The temp file preserves the .py
+    extension so Semgrep's language detection works correctly.
+    """
     with SEMGREP_LOCK:
+        tmp_fd = None
+        tmp_path = None
         try:
+            # Write source to a real temp file — Semgrep needs a path on disk
+            suffix = os.path.splitext(filepath)[1] or ".py"
+            tmp_fd, tmp_path = tempfile.mkstemp(suffix=suffix, prefix="chakra_scan_")
+            with os.fdopen(tmp_fd, "w", encoding="utf-8") as tmp_f:
+                tmp_f.write(source_code)
+            tmp_fd = None  # fd is now closed by os.fdopen
+
             result = subprocess.run(
-                ["semgrep", "--config", "p/python", "--json", filepath],
+                ["semgrep", "--config", "p/python", tmp_path, "--json", "--no-git-ignore", "--disable-version-check"],
                 capture_output=True,
                 text=True
             )
@@ -41,7 +56,10 @@ def _run_semgrep(filepath: str) -> list:
                 return []
                 
             data = json.loads(result.stdout)
-            return data.get("results", [])
+            results = data.get("results", [])
+            logger.info(f"[DEBUG] Semgrep raw output: {len(results)} results for {filepath}")
+            logger.info(f"[DEBUG] Semgrep raw JSON: {json.dumps(data, indent=2)[:2000]}")
+            return results
             
         except FileNotFoundError:
             logger.warning("Semgrep executable not found. Falling back to Scout only.")
@@ -49,6 +67,18 @@ def _run_semgrep(filepath: str) -> list:
         except Exception as e:
             logger.warning(f"Failed to run semgrep: {e}")
             return []
+        finally:
+            # Clean up temp file
+            if tmp_fd is not None:
+                try:
+                    os.close(tmp_fd)
+                except OSError:
+                    pass
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
 
 def _extract_cwe_from_semgrep(sg: dict) -> str:
     metadata = sg.get("extra", {}).get("metadata", {})
@@ -86,7 +116,7 @@ def run_audit(scout_output: dict, source_code: str, filepath: str) -> list:
     6. Returns verified list with line_number, cwe, and severity.
     """
     
-    raw_semgrep = _run_semgrep(filepath)
+    raw_semgrep = _run_semgrep(filepath, source_code)
     scout_patterns = scout_output.get("dangerous_patterns", [])
     
     combined = []
@@ -185,6 +215,8 @@ def run_audit(scout_output: dict, source_code: str, filepath: str) -> list:
 
     verified_findings = []
     
+    logger.info(f"[DEBUG] LLM raw response type: {type(llm_response).__name__}, content preview: {json.dumps(llm_response, default=str)[:1000]}")
+    
     # Re-iterate array structures from LLM back into native application bounds, filtering False Positives
     if isinstance(llm_response, list):
         for f in llm_response:
@@ -200,7 +232,8 @@ def run_audit(scout_output: dict, source_code: str, filepath: str) -> list:
     elif isinstance(llm_response, dict) and "error" in llm_response:
         logger.warning(f"LLM Client encountered an error: {llm_response['error']}")
         return []
-        
+    
+    logger.info(f"[DEBUG] Audit stage: {len(batched_findings)} findings sent to LLM, {len(verified_findings)} confirmed after filter")
     return verified_findings
 
 if __name__ == "__main__":

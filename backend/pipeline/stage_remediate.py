@@ -84,7 +84,8 @@ def run_remediate(confirmed_findings: list, scout_output: dict, source_code: str
         # Validation of existing dismissals 
         if not db.is_dismissed(fingerprint):
             final_findings.append(finding)
-            
+    
+    logger.info(f"[DEBUG] Remediate stage: {len(enriched_response)} enriched findings in, {len(final_findings)} after dismissal filter")
     return final_findings
 
 if __name__ == "__main__":
