@@ -63,6 +63,10 @@ def _run_semgrep(filepath: str, source_code: str) -> list:
     strings passed via stdin in --json mode. The temp file preserves the .py
     extension so Semgrep's language detection works correctly.
     """
+    print(f"DEBUG: _run_semgrep called — source_code length = {len(source_code)}", flush=True)
+    print(f"DEBUG: filepath = {filepath}", flush=True)
+    print(f"DEBUG: rules_path = {RULES_PATH}", flush=True)
+
     with SEMGREP_LOCK:
         tmp_fd = None
         tmp_path = None
@@ -70,24 +74,35 @@ def _run_semgrep(filepath: str, source_code: str) -> list:
             # Write source to a real temp file — Semgrep needs a path on disk
             suffix = os.path.splitext(filepath)[1] or ".py"
             tmp_fd, tmp_path = tempfile.mkstemp(suffix=suffix, prefix="chakra_scan_")
+            print(f"DEBUG: Created temp file at {tmp_path}", flush=True)
+
             with os.fdopen(tmp_fd, "w", encoding="utf-8") as tmp_f:
                 tmp_f.write(source_code)
             tmp_fd = None  # fd is now closed by os.fdopen
+            print(f"DEBUG: Wrote {len(source_code)} bytes to temp file", flush=True)
+
+            # Verify file has content
+            with open(tmp_path, "r", encoding="utf-8") as _vf:
+                _content = _vf.read()
+            print(f"DEBUG: Temp file contains {len(_content)} bytes after write", flush=True)
 
             result = subprocess.run(
                 ["semgrep", "--config", RULES_PATH, tmp_path, "--json", "--no-git-ignore", "--disable-version-check"],
                 capture_output=True,
                 text=True
             )
+            print(f"DEBUG: Semgrep exit code = {result.returncode}", flush=True)
             # 0=ok, 1=finding. Anything else indicates Semgrep threw an unrecoverable exception
             if result.returncode not in (0, 1):
                 logger.warning(f"Semgrep returned unexpected exit code {result.returncode}. Output: {result.stderr}")
+                print(f"DEBUG: Semgrep stderr = {result.stderr[:500]}", flush=True)
                 return []
                 
             data = json.loads(result.stdout)
             results = data.get("results", [])
             logger.info(f"[DEBUG] Semgrep raw output: {len(results)} results for {filepath}")
             logger.info(f"[DEBUG] Semgrep raw JSON: {json.dumps(data, indent=2)[:2000]}")
+            print(f"DEBUG: Semgrep returned {len(results)} results", flush=True)
             return results
             
         except FileNotFoundError:

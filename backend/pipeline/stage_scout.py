@@ -188,7 +188,56 @@ def run_scout(source_code: str, filepath: str) -> dict:
 
     visitor = ScoutVisitor()
     visitor.visit(tree)
-    
+
+    # ------------------------------------------------------------------
+    # Module-level scan: the ScoutVisitor only walks inside function/class
+    # bodies.  This second pass covers dangerous calls that appear at
+    # module scope (e.g. `os.system('ls')` written directly in a script).
+    # ------------------------------------------------------------------
+    # Track which (pattern_type, lineno) pairs were already found inside
+    # functions so we don't double-count them.
+    _visitor_sigs = set(
+        (p["pattern_type"], p.get("line_number", 0)) for p in dangerous_patterns
+    )
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+
+        func_name = ""
+        val_id = ""
+        if isinstance(node.func, ast.Name):
+            func_name = node.func.id
+        elif isinstance(node.func, ast.Attribute):
+            func_name = node.func.attr
+            if isinstance(node.func.value, ast.Name):
+                val_id = node.func.value.id
+
+        lineno = getattr(node, "lineno", 0)
+        snippet = lines[lineno - 1].strip() if lineno and 0 < lineno <= len(lines) else ""
+
+        candidate = None
+        if func_name == "system" and val_id == "os":
+            candidate = {"pattern_type": "subprocess_call", "line_number": lineno, "source_snippet": snippet}
+        elif val_id == "subprocess" or func_name in ["Popen", "call", "check_call", "check_output", "run"]:
+            if "subprocess" in snippet or func_name in ["Popen", "system"]:
+                candidate = {"pattern_type": "subprocess_call", "line_number": lineno, "source_snippet": snippet}
+        elif func_name == "eval":
+            candidate = {"pattern_type": "eval_call", "line_number": lineno, "source_snippet": snippet}
+        elif func_name == "exec":
+            candidate = {"pattern_type": "exec_call", "line_number": lineno, "source_snippet": snippet}
+        elif val_id == "pickle" and func_name in ["loads", "load"]:
+            candidate = {"pattern_type": "pickle_load", "line_number": lineno, "source_snippet": snippet}
+        elif val_id == "hashlib" and func_name == "md5":
+            candidate = {"pattern_type": "md5_hash", "line_number": lineno, "source_snippet": snippet}
+
+        if candidate:
+            sig = (candidate["pattern_type"], candidate["line_number"])
+            if sig not in _visitor_sigs:
+                _visitor_sigs.add(sig)
+                dangerous_patterns.append(candidate)
+    # ------------------------------------------------------------------
+
     unique_imports = list(set([imp["module"].split(".")[0] for imp in imports]))
     
     def normalize_finding(f):

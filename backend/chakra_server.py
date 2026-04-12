@@ -66,6 +66,8 @@ def setup_logging() -> None:
 
 # Single global dependencies
 llm_client = LLMClient()
+state_manager = StateManager()
+state_manager.load_all_into_memory()
 SCAN_QUEUE = queue.Queue(maxsize=10)
 
 DEPLOYMENT_MODE = os.environ.get("DEPLOYMENT_MODE", "local")
@@ -74,35 +76,67 @@ PORT = int(os.environ.get("PORT", "7777"))
 DEFAULT_ORG_ID = os.environ.get("DEFAULT_ORG_ID", "default")
 
 # 5.3 Limit map
-DEV_RATE_LIMITS = defaultdict(list)
+_rate_limit_counters = {}
 
 def check_rate_limit(dev_id: str) -> bool:
     """Limits individual developers to 10 incoming pipeline requests every 60 seconds."""
     now = time.time()
-    DEV_RATE_LIMITS[dev_id] = [t for t in DEV_RATE_LIMITS[dev_id] if now - t < 60]
-    if len(DEV_RATE_LIMITS[dev_id]) >= 10:
+    if dev_id not in _rate_limit_counters:
+        _rate_limit_counters[dev_id] = []
+    _rate_limit_counters[dev_id] = [t for t in _rate_limit_counters[dev_id] if now - t < 60]
+    if len(_rate_limit_counters[dev_id]) >= 10:
         return False
-    DEV_RATE_LIMITS[dev_id].append(now)
+    _rate_limit_counters[dev_id].append(now)
     return True
 
 def handle_scan(filepath: str, source_code: str, org_id: str, dev_id: str) -> Dict[str, Any]:
     """
     Main entrypoint for the scan handler.
     Returns the JSON 5.4 layout directly to the threaded socket payload queue.
+
+    Source resolution priority:
+      1. Inline ``source_code`` — used as-is when non-empty (API / VS Code inline scan).
+      2. File on disk (``filepath``) — read only when ``source_code`` is empty
+         (file-based scanning that already works correctly).
     """
-    state_manager = StateManager()
+    filepath = filepath.replace("\\", "/").strip().lower()
     start_time = time.time()
-    
+
+    # ------------------------------------------------------------------
+    # Source resolution: inline payload wins; disk is a fallback only
+    # when the file actually exists on disk.
+    # ------------------------------------------------------------------
+    if not source_code and filepath and os.path.exists(filepath):
+        logger.info(f"[handle_scan] No inline source; reading from disk: '{filepath}'",
+                    extra={"dev_id": dev_id})
+        with open(filepath, 'r', encoding='utf-8') as f:
+            source_code = f.read()
+        logger.info(f"[handle_scan] Read {len(source_code)} chars from '{filepath}'",
+                    extra={"dev_id": dev_id})
+    elif not source_code:
+        logger.warning(f"[handle_scan] No source provided and '{filepath}' does not exist on disk.",
+                       extra={"dev_id": dev_id})
+        return {"findings": [], "error": "No source code provided and filepath does not exist on disk"}
+    else:
+        logger.info(f"[handle_scan] Using inline source_code for '{filepath}' "
+                    f"({len(source_code)} chars)", extra={"dev_id": dev_id})
+    # ------------------------------------------------------------------
+
     old_fingerprints = state_manager.get_fingerprint(filepath, org_id, dev_id)
+    logger.info(f"[handle_scan] get_fingerprint for '{filepath}': {old_fingerprints}", extra={"dev_id": dev_id})
     new_fingerprints = compute_fingerprints(source_code)
     
     if not old_fingerprints:
         scout_output = run_scout(source_code, filepath)
         audit_findings = run_audit(scout_output, source_code, filepath)
-        findings = run_remediate(audit_findings, scout_output, source_code, llm_client)
+        findings = run_remediate(audit_findings, scout_output, source_code, llm_client, state_manager)
         
+        print(f"[DEBUG] Saving {len(findings)} findings, first has explanation: {'explanation' in findings[0] if findings else 'N/A'}")
+        print(f"[DEBUG] About to save findings: filepath={filepath}, org_id={org_id}, dev_id={dev_id}, count={len(findings)}")
         state_manager.set_findings(filepath, org_id, dev_id, findings)
+        print(f"[DEBUG] Findings saved successfully")
         state_manager.set_fingerprint(filepath, org_id, dev_id, new_fingerprints)
+        logger.info(f"[handle_scan] set_fingerprint successfully called for '{filepath}' (full scan).", extra={"dev_id": dev_id})
         
         scan_time_ms = int((time.time() - start_time) * 1000)
         state_manager.log_scan(org_id, dev_id, filepath, "file_full", len(findings), scan_time_ms, 0)
@@ -136,7 +170,7 @@ def handle_scan(filepath: str, source_code: str, org_id: str, dev_id: str) -> Di
     
     scout_output = run_scout(slice_source, filepath)
     audit_findings = run_audit(scout_output, slice_source, filepath)
-    new_findings = run_remediate(audit_findings, scout_output, slice_source, llm_client)
+    new_findings = run_remediate(audit_findings, scout_output, slice_source, llm_client, state_manager)
     
     for nf in new_findings:
         if nf.get("source") == "scout":
@@ -147,8 +181,12 @@ def handle_scan(filepath: str, source_code: str, org_id: str, dev_id: str) -> Di
     merged_findings = [f for f in old_findings if not (start_line <= f.get("line_number", 0) <= end_line)]
     merged_findings.extend(new_findings)
         
+    print(f"[DEBUG] Saving {len(merged_findings)} findings, first has explanation: {'explanation' in merged_findings[0] if merged_findings else 'N/A'}")
+    print(f"[DEBUG] About to save findings: filepath={filepath}, org_id={org_id}, dev_id={dev_id}, count={len(merged_findings)}")
     state_manager.set_findings(filepath, org_id, dev_id, merged_findings)
+    print(f"[DEBUG] Findings saved successfully")
     state_manager.set_fingerprint(filepath, org_id, dev_id, new_fingerprints)
+    logger.info(f"[handle_scan] set_fingerprint successfully called for '{filepath}' (partial scan).", extra={"dev_id": dev_id})
     
     scan_time_ms = int((time.time() - start_time) * 1000)
     state_manager.log_scan(org_id, dev_id, filepath, "file_partial", len(merged_findings), scan_time_ms, 0)
@@ -161,22 +199,21 @@ def handle_scan(filepath: str, source_code: str, org_id: str, dev_id: str) -> Di
 
 def handle_dismiss(data: dict) -> dict:
     filepath = data.get("filepath", "")
-    cwe = data.get("cwe", "unknown")
-    original_line_content = data.get("original_line_content", "")
     org_id = data.get("org_id", "default")
     dev_id = data.get("dev_id", "anon")
-    
-    norm_path = filepath.replace("\\", "/").lower()
-    line_stripped = original_line_content.strip()
-    payload = f"{norm_path}{cwe}{line_stripped}"
-    fingerprint = hashlib.sha256(payload.encode('utf-8')).hexdigest()
-    
-    db = StateManager()
-    db.add_dismissal(fingerprint, org_id, dev_id, filepath)
-    
-    existing = db.get_findings(filepath, org_id, dev_id) or []
-    updated = [f for f in existing if f.get("dismissal_fingerprint") != fingerprint]
-    db.set_findings(filepath, org_id, dev_id, updated)
+    # Use dismissal_fingerprint directly if provided
+    fingerprint = data.get("dismissal_fingerprint", "")
+    if not fingerprint:
+        # fallback: recompute from parts
+        cwe = data.get("cwe", "unknown")
+        original_line_content = data.get("original_line_content", "")
+        norm_path = filepath.replace("\\", "/").lower()
+        line_stripped = original_line_content.strip()
+        payload = f"{norm_path}{cwe}{line_stripped}"
+        fingerprint = hashlib.sha256(payload.encode('utf-8')).hexdigest()
+    state_manager.add_dismissal(fingerprint, org_id, dev_id, filepath)
+    return {"success": True}
+    state_manager.add_dismissal(fingerprint, org_id, dev_id, filepath)
     
     return {"success": True}
 
@@ -206,7 +243,7 @@ def process_repo_scan(scan_id: int, repo_url: str, org_id: str, dev_id: str):
                         
                         scout_res = run_scout(src, full_path)
                         audit_res = run_audit(scout_res, src, full_path)
-                        local_findings = run_remediate(audit_res, scout_res, src, llm_client)
+                        local_findings = run_remediate(audit_res, scout_res, src, llm_client, state_manager)
                         
                         for fnd in local_findings:
                             fnd["filepath"] = rel_path
@@ -217,8 +254,7 @@ def process_repo_scan(scan_id: int, repo_url: str, org_id: str, dev_id: str):
         if temp_dir_obj:
             temp_dir_obj.cleanup()
 
-        db = StateManager()
-        with db.get_connection() as conn:
+        with state_manager.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
                 UPDATE repo_scans 
@@ -228,8 +264,7 @@ def process_repo_scan(scan_id: int, repo_url: str, org_id: str, dev_id: str):
             conn.commit()
     except Exception as e:
         logger.error(f"Repo scan {scan_id} failed: {e}")
-        db = StateManager()
-        with db.get_connection() as conn:
+        with state_manager.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
                 UPDATE repo_scans 
@@ -243,8 +278,7 @@ def handle_repo_scan(data: dict) -> dict:
     org_id = data.get("org_id", "default")
     dev_id = data.get("dev_id", "anon")
     
-    db = StateManager()
-    with db.get_connection() as conn:
+    with state_manager.get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute('''
             INSERT INTO repo_scans (org_id, repo_url, status, started_at)
@@ -283,7 +317,6 @@ def scan_worker():
             logger.error(f"Thread worker encountered an unrecoverable crash: {e}")
 
 def cleanup_worker():
-    state_manager = StateManager()
     while True:
         time.sleep(3600)
         try:
@@ -349,8 +382,7 @@ class ChakraHTTPRequestHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 return
 
-            db = StateManager()
-            with db.get_connection() as conn:
+            with state_manager.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("SELECT status, findings_json FROM repo_scans WHERE id=?", (scan_id,))
                 row = cursor.fetchone()
@@ -391,8 +423,7 @@ class ChakraHTTPRequestHandler(BaseHTTPRequestHandler):
             
         if path == '/findings':
             org_id = query.get("org_id", ["default"])[0]
-            db = StateManager()
-            findings = db.get_org_findings(org_id)
+            findings = state_manager.get_org_findings(org_id)
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -402,13 +433,21 @@ class ChakraHTTPRequestHandler(BaseHTTPRequestHandler):
 
         if path == '/stats':
             org_id = query.get("org_id", ["default"])[0]
-            db = StateManager()
-            stats = db.get_org_stats(org_id)
+            stats = state_manager.get_org_stats(org_id)
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps(stats).encode())
+            return
+
+        if path == '/debug/reset-rate-limit':
+            _rate_limit_counters.clear()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(b'{"success": true}')
             return
 
         self.send_response(404)
@@ -509,9 +548,6 @@ class ChakraHTTPRequestHandler(BaseHTTPRequestHandler):
 
 def run_server():
     setup_logging()
-
-    state_manager = StateManager()
-    state_manager.load_all_into_memory()
 
     cleaner = threading.Thread(target=cleanup_worker, daemon=True)
     cleaner.start()

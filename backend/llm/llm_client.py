@@ -93,7 +93,8 @@ class LLMClient:
         payload = {
             "model": self.ollama_model,
             "prompt": full_prompt,
-            "stream": False
+            "stream": False,
+            "num_predict": 500
         }
         
         try:

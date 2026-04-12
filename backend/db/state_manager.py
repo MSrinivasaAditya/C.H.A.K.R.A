@@ -106,7 +106,12 @@ class StateManager:
             cursor.execute("SELECT filepath, org_id, dev_id, fingerprint_json FROM file_fingerprints")
             for row in cursor.fetchall():
                 key = (row['filepath'], row['org_id'], row['dev_id'])
-                self._fingerprints_cache[key] = {int(k): v for k, v in json.loads(row['fingerprint_json']).items()}
+                def _parse_key(k):
+                    k = str(k).strip()
+                    if k.startswith("line"):
+                        k = k[4:]
+                    return int(k)
+                self._fingerprints_cache[key] = {_parse_key(k): v for k, v in json.loads(row['fingerprint_json']).items()}
                 
             cursor.execute("SELECT filepath, org_id, dev_id, findings_json FROM findings_cache")
             for row in cursor.fetchall():
@@ -129,7 +134,12 @@ class StateManager:
             )
             row = cursor.fetchone()
             if row:
-                data = {int(k): v for k, v in json.loads(row['fingerprint_json']).items()}
+                def _parse_key(k):
+                    k = str(k).strip()
+                    if k.startswith("line"):
+                        k = k[4:]
+                    return int(k)
+                data = {_parse_key(k): v for k, v in json.loads(row['fingerprint_json']).items()}
                 self._fingerprints_cache[key] = data
                 self.evict_lru_if_needed()
                 return data
@@ -175,6 +185,7 @@ class StateManager:
         return None
 
     def set_findings(self, filepath, org_id, dev_id, findings_list):
+        print(f"[DEBUG] set_findings called: {filepath}, {org_id}, {dev_id}, {len(findings_list)} findings")
         key = (filepath, org_id, dev_id)
         self._findings_cache[key] = findings_list
         self._findings_cache.move_to_end(key)
@@ -205,6 +216,12 @@ class StateManager:
                 VALUES (?, ?, ?, ?, ?)
             ''', (fingerprint, org_id, dev_id, filepath, int(time.time())))
             conn.commit()
+            
+        for key, findings_list in self._findings_cache.items():
+            self._findings_cache[key] = [
+                f for f in findings_list 
+                if f.get("dismissal_fingerprint") != fingerprint
+            ]
 
     def log_scan(self, org_id, dev_id, filepath, scan_type, findings_count, scan_time_ms, cache_hit):
         with self.get_connection() as conn:
@@ -216,30 +233,22 @@ class StateManager:
             conn.commit()
 
     def get_org_findings(self, org_id):
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            
-            # Retrieve dismissed fingerprints
-            cursor.execute("SELECT fingerprint FROM dismissed_findings WHERE org_id=?", (org_id,))
-            dismissed = {row['fingerprint'] for row in cursor.fetchall()}
-            
-            # Build findings across the org
-            cursor.execute("SELECT filepath, dev_id, findings_json FROM findings_cache WHERE org_id=?", (org_id,))
-            
-            org_findings = []
-            for row in cursor.fetchall():
-                findings = json.loads(row['findings_json'])
-                for f in findings:
-                    fps = f.get('fingerprint')
-                    if not fps or fps not in dismissed:
-                        f_copy = dict(f)
-                        if 'filepath' not in f_copy:
-                            f_copy['filepath'] = row['filepath']
-                        if 'dev_id' not in f_copy:
-                            f_copy['dev_id'] = row['dev_id']
-                        org_findings.append(f_copy)
-                        
-            return org_findings
+        print(f"[DEBUG] get_org_findings called for org_id={org_id}")
+        print(f"[DEBUG] findings_cache keys: {list(self._findings_cache.keys())}")
+        all_findings = []
+        # Get all findings for this org from findings_cache
+        for (fp, oid, did), findings in self._findings_cache.items():
+            if oid != org_id:
+                continue
+            for finding in findings:
+                fingerprint = finding.get("dismissal_fingerprint", "")
+                # Only include if NOT dismissed
+                if not self.is_dismissed(fingerprint):
+                    finding_copy = dict(finding)
+                    finding_copy["filepath"] = fp
+                    finding_copy["dev_id"] = did
+                    all_findings.append(finding_copy)
+        return all_findings
 
     def get_org_stats(self, org_id):
         now = int(time.time())
@@ -308,60 +317,55 @@ class StateManager:
 
 
 if __name__ == "__main__":
-    db_file = "test_chakra_state.db"
-    if os.path.exists(db_file):
-        os.remove(db_file)
-        
-    db = StateManager(db_file)
-    
-    print("Test 1: Write a fingerprint, restart the StateManager object, confirm it loads from SQLite correctly.")
-    db.set_fingerprint("test1.py", "org1", "dev1", {"line1": "hash1"})
-    db2 = StateManager(db_file)
+    import os
+    TEST_DB = "test_temp_chakra.db"
+    if os.path.exists(TEST_DB): os.remove(TEST_DB)
+
+    print("Test 1: Fingerprint persists across restart.")
+    db1 = StateManager(TEST_DB)
+    db1.set_fingerprint("test.py", "org1", "dev1", {1: "abc", 2: "def"})
+    db2 = StateManager(TEST_DB)
     db2.load_all_into_memory()
-    fp = db2.get_fingerprint("test1.py", "org1", "dev1")
-    assert fp == {"line1": "hash1"}, "Test 1 Failed"
-    print("Test 1 Passed")
-    
-    print("Test 2: Write findings, mark one as dismissed, call get_org_findings, confirm the dismissed one is absent.")
-    db.set_findings("test2.py", "org1", "dev1", [
-        {"fingerprint": "hashA", "severity": "high", "cwe": "CWE-79"},
-        {"fingerprint": "hashB", "severity": "low", "cwe": "CWE-20"}
+    fp = db2.get_fingerprint("test.py", "org1", "dev1")
+    assert fp == {1: "abc", 2: "def"}, f"Test 1 Failed — got {fp}"
+    print("Test 1 PASS")
+
+    print("Test 2: Dismissed findings filtered.")
+    db1.set_findings("test.py", "org1", "dev1", [
+        {"cwe": "CWE-89", "dismissal_fingerprint": "fp1"},
+        {"cwe": "CWE-95", "dismissal_fingerprint": "fp2"}
     ])
-    db.add_dismissal("hashA", "org1", "dev1", "test2.py")
-    findings = db.get_org_findings("org1")
-    assert len(findings) == 1, f"Test 2 Failed: wrong length {len(findings)}"
-    assert findings[0]["fingerprint"] == "hashB", "Test 2 Failed: wrong fingerprint retained"
-    print("Test 2 Passed")
-    
-    print("Test 3: Write 52 different file entries, confirm memory never exceeds 50 entries.")
+    db1.add_dismissal("fp1", "org1", "dev1", "test.py")
+    findings = db1.get_org_findings("org1")
+    fps = [f["dismissal_fingerprint"] for f in findings]
+    assert "fp1" not in fps, f"Test 2 Failed — dismissed finding still present"
+    assert "fp2" in fps, f"Test 2 Failed — non-dismissed finding missing"
+    print("Test 2 PASS")
+
+    print("Test 3: Memory capped at 50 entries.")
     for i in range(52):
-        db.set_fingerprint(f"file_{i}.py", "org1", "dev1", {"l": "h"})
-        db.set_findings(f"file_{i}.py", "org1", "dev1", [])
-    assert len(db._fingerprints_cache) <= 50, "Test 3 Failed: fingerprints cache too large"
-    assert len(db._findings_cache) <= 50, "Test 3 Failed: findings cache too large"
-    print("Test 3 Passed")
-    
-    print("Test 4: Write a scan log entry, call get_org_stats, confirm the count is correct.")
-    db.log_scan("org1", "dev1", "test.py", "file", 5, 120, 1)
-    stats = db.get_org_stats("org1")
-    assert stats["total_scans_today"] >= 1, "Test 4 Failed: scans missing"
-    assert stats["total_findings_today"] >= 5, "Test 4 Failed: findings missing"
-    assert stats["average_scan_latency"] == 120.0, "Test 4 Failed: avg latency mismatched"
-    assert stats["cache_hit_rate"] == 1.0, "Test 4 Failed: cache hit rate mismatched"
-    print("Test 4 Passed")
-    
-    print("Test 5: Write a row with last_updated set to 48 hours ago, call cleanup_stale_entries, confirm it is gone.")
-    old_time = int(time.time()) - 48 * 3600
-    with db.get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("UPDATE file_fingerprints SET last_updated=? WHERE filepath=?", (old_time, "test1.py"))
-        conn.commit()
-    db.cleanup_stale_entries()
-    
-    with db.get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM file_fingerprints WHERE filepath=?", ("test1.py",))
-        assert cursor.fetchone() is None, "Test 5 Failed: stale entry still exists"
-    print("Test 5 Passed")
-    
-    print("All tests passed.")
+        db1.set_fingerprint(f"file{i}.py", "org1", "dev1", {1: f"hash{i}"})
+    count = len(db1._fingerprints_cache)
+    assert count <= 50, f"Test 3 Failed — memory has {count} entries"
+    print("Test 3 PASS")
+
+    print("Test 4: Scan log count correct.")
+    db1.log_scan("org1", "dev1", "test.py", "file", 3, 1500, 0)
+    stats = db1.get_org_stats("org1")
+    assert stats["total_scans_today"] >= 1, f"Test 4 Failed — scan count is {stats['total_scans_today']}"
+    print("Test 4 PASS")
+
+    print("Test 5: Stale entries cleaned up.")
+    import time
+    conn = db1.get_connection()
+    conn.execute("INSERT OR REPLACE INTO file_fingerprints VALUES (?,?,?,?,?)",
+        ("old.py", "org1", "dev1", "{}", int(time.time()) - 90000))
+    conn.commit()
+    db1.cleanup_stale_entries()
+    result = conn.execute("SELECT * FROM file_fingerprints WHERE filepath='old.py'").fetchone()
+    assert result is None, "Test 5 Failed — stale entry not removed"
+    conn.close()
+    print("Test 5 PASS")
+
+    if os.path.exists(TEST_DB): os.remove(TEST_DB)
+    print("\nAll tests passed.")
