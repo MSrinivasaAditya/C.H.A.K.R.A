@@ -9,7 +9,7 @@ AWS_SECRET_ACCESS_KEY = "AKIAIOSFODNN7EXAMPLE"
 API_TOKEN = "xyz123_super_secret_token"
 
 def check_user_login(username, password):
-    """
+    """""
     Vulnerability 2: SQL Injection
     Constructs a SQL query using string interpolation (f-strings) instead of parameterized queries.
     """
