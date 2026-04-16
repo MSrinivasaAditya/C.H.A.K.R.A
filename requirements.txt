@@ -3,3 +3,4 @@ semgrep
 python-dotenv
 gitpython
 requests
+ollama

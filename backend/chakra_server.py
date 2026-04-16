@@ -247,12 +247,25 @@ def process_repo_scan(scan_id: int, repo_url: str, org_id: str, dev_id: str):
                         
                         for fnd in local_findings:
                             fnd["filepath"] = rel_path
+                            fnd["source"] = "repo"
                         findings.extend(local_findings)
                     except Exception as e:
                         logger.error(f"Error processing {full_path} in repo scan: {e}")
                         
         if temp_dir_obj:
             temp_dir_obj.cleanup()
+
+        # Save each file's findings to the main findings cache
+        # so they appear in the dashboard findings table permanently
+        from collections import defaultdict
+        findings_by_file = defaultdict(list)
+        for finding in findings:
+            fp = finding.get("filepath", "unknown")
+            findings_by_file[fp].append(finding)
+
+        for fp, file_findings in findings_by_file.items():
+            state_manager.set_findings(fp, org_id, dev_id, file_findings)
+            state_manager.log_scan(org_id, dev_id, fp, "repo", len(file_findings), 0, 0)
 
         with state_manager.get_connection() as conn:
             cursor = conn.cursor()
@@ -423,7 +436,10 @@ class ChakraHTTPRequestHandler(BaseHTTPRequestHandler):
             
         if path == '/findings':
             org_id = query.get("org_id", ["default"])[0]
+            source_filter = query.get("source", [None])[0]
             findings = state_manager.get_org_findings(org_id)
+            if source_filter:
+                findings = [f for f in findings if f.get("source") == source_filter]
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
