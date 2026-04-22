@@ -318,14 +318,40 @@
 
     <!-- ═══ LOADING SCREEN ═══ -->
     <div id="chakra-loading-screen" style="position: fixed; inset: 0; background: #0d1117; z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: opacity 0.4s ease-out;">
-        <svg id="loading-wheel" viewBox="0 0 100 100" width="120" height="120" style="animation: spin 1.2s linear infinite;">
-            <circle cx="50" cy="50" r="40" fill="none" stroke="#ef4444" stroke-width="12" stroke-dasharray="30 221.327" stroke-dashoffset="0"/>
-            <circle cx="50" cy="50" r="40" fill="none" stroke="#f97316" stroke-width="12" stroke-dasharray="30 221.327" stroke-dashoffset="-35.9"/>
-            <circle cx="50" cy="50" r="40" fill="none" stroke="#eab308" stroke-width="12" stroke-dasharray="30 221.327" stroke-dashoffset="-71.8"/>
-            <circle cx="50" cy="50" r="40" fill="none" stroke="#22c55e" stroke-width="12" stroke-dasharray="30 221.327" stroke-dashoffset="-107.7"/>
-            <circle cx="50" cy="50" r="40" fill="none" stroke="#3b82f6" stroke-width="12" stroke-dasharray="30 221.327" stroke-dashoffset="-143.6"/>
-            <circle cx="50" cy="50" r="40" fill="none" stroke="#6366f1" stroke-width="12" stroke-dasharray="30 221.327" stroke-dashoffset="-179.5"/>
-            <circle cx="50" cy="50" r="40" fill="none" stroke="#a855f7" stroke-width="12" stroke-dasharray="30 221.327" stroke-dashoffset="-215.4"/>
+        <svg id="loading-wheel" viewBox="0 0 100 100" width="120" height="120" style="animation: spin 3s linear infinite;">
+            <defs>
+                <linearGradient id="load-sunGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stop-color="#fbbf24" />
+                    <stop offset="50%" stop-color="#f59e0b" />
+                    <stop offset="100%" stop-color="#b45309" />
+                </linearGradient>
+                <linearGradient id="load-chakraGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+                    <stop offset="0%" stop-color="#f97316" />
+                    <stop offset="100%" stop-color="#fcd34d" />
+                </linearGradient>
+                <path id="load-ray" d="M50 2 L58 24 L50 18 L42 24 Z" fill="url(#load-sunGrad)" />
+            </defs>
+            <!-- 8 Sun Rays -->
+            <use href="#load-ray" />
+            <use href="#load-ray" transform="rotate(45 50 50)" />
+            <use href="#load-ray" transform="rotate(90 50 50)" />
+            <use href="#load-ray" transform="rotate(135 50 50)" />
+            <use href="#load-ray" transform="rotate(180 50 50)" />
+            <use href="#load-ray" transform="rotate(225 50 50)" />
+            <use href="#load-ray" transform="rotate(270 50 50)" />
+            <use href="#load-ray" transform="rotate(315 50 50)" />
+            <!-- Inner Chakra Disc -->
+            <circle cx="50" cy="50" r="24" fill="#0d1117" stroke="url(#load-chakraGrad)" stroke-width="4" />
+            <circle cx="50" cy="50" r="18" fill="none" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="3 3" />
+            <!-- 8 Spokes of the Chakra -->
+            <g stroke="url(#load-chakraGrad)" stroke-width="2.5" stroke-linecap="round">
+                <line x1="50" y1="26" x2="50" y2="74" />
+                <line x1="26" y1="50" x2="74" y2="50" />
+                <line x1="33" y1="33" x2="67" y2="67" />
+                <line x1="33" y1="67" x2="67" y2="33" />
+            </g>
+            <!-- Center Bindu -->
+            <circle cx="50" cy="50" r="6" fill="url(#load-sunGrad)" />
         </svg>
         <div style="margin-top: 2rem; font-size: 2.2rem; font-weight: 800; letter-spacing: 12px; color: #fff; animation: pulse-text 2s infinite;">C.H.A.K.R.A</div>
         <div id="loading-status-text" style="margin-top: 1rem; color: #a1a1aa; font-family: monospace; font-size: 1.1rem; height: 1.5rem; transition: opacity 0.2s;">Initializing security pipeline...</div>
@@ -346,16 +372,29 @@
                             <stop offset="0%" stop-color="#f97316" />
                             <stop offset="100%" stop-color="#fcd34d" />
                         </linearGradient>
+                        <path id="nav-ray" d="M50 2 L58 24 L50 18 L42 24 Z" fill="url(#sunGrad)" />
                     </defs>
-                    <!-- Outer Sun Petals (Surya Mandir style) -->
-                    <path d="M50 0 L56 18 L75 7 L68 25 L88 22 L75 38 L97 45 L80 55 L97 70 L78 72 L88 88 L68 80 L72 98 L56 86 L50 100 L44 86 L28 98 L32 80 L12 88 L22 72 L3 70 L20 55 L3 45 L25 38 L12 22 L32 25 L25 7 L44 18 Z" fill="url(#sunGrad)" />
+                    <!-- Outer Sun Petals -->
+                    <use href="#nav-ray" />
+                    <use href="#nav-ray" transform="rotate(45 50 50)" />
+                    <use href="#nav-ray" transform="rotate(90 50 50)" />
+                    <use href="#nav-ray" transform="rotate(135 50 50)" />
+                    <use href="#nav-ray" transform="rotate(180 50 50)" />
+                    <use href="#nav-ray" transform="rotate(225 50 50)" />
+                    <use href="#nav-ray" transform="rotate(270 50 50)" />
+                    <use href="#nav-ray" transform="rotate(315 50 50)" />
                     <!-- Inner Chakra Disc -->
-                    <circle cx="50" cy="50" r="26" fill="#111113" stroke="url(#chakraGrad)" stroke-width="4" />
-                    <circle cx="50" cy="50" r="20" fill="none" stroke="#f59e0b" stroke-width="1" stroke-dasharray="2 3" />
+                    <circle cx="50" cy="50" r="24" fill="#111113" stroke="url(#chakraGrad)" stroke-width="4" />
+                    <circle cx="50" cy="50" r="18" fill="none" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="3 3" />
                     <!-- 8 Spokes of the Chakra -->
-                    <path d="M50 24 L50 76 M24 50 L76 50 M31.6 31.6 L68.4 68.4 M31.6 68.4 L68.4 31.6" stroke="url(#chakraGrad)" stroke-width="2.5" />
+                    <g stroke="url(#chakraGrad)" stroke-width="2.5" stroke-linecap="round">
+                        <line x1="50" y1="26" x2="50" y2="74" />
+                        <line x1="26" y1="50" x2="74" y2="50" />
+                        <line x1="33" y1="33" x2="67" y2="67" />
+                        <line x1="33" y1="67" x2="67" y2="33" />
+                    </g>
                     <!-- Center Bindu -->
-                    <circle cx="50" cy="50" r="7" fill="url(#sunGrad)" />
+                    <circle cx="50" cy="50" r="6" fill="url(#sunGrad)" />
                 </svg>
             </div>
             <span class="brand-text">CHAKRA</span>
