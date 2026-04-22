@@ -1,159 +1,291 @@
-<div align="center">
-
 # C.H.A.K.R.A
 ### Codebase Hardening through Agentic Knowledge, Risk and Audit
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-Frontend-blue.svg)](https://www.typescriptlang.org/)
-[![Status: Active](https://img.shields.io/badge/Status-Active-brightgreen.svg)]()
+> *Most security scanners tell you what is wrong and stop. CHAKRA tells you what is wrong, why an attacker would care, how to fix it right now, and how to avoid reintroducing it when you extend the code — all running locally, with no source code leaving your machine.*
 
-**Most security scanners find the problem and leave you to fix it. CHAKRA finds it, patches it, and verifies the patch works.**
-
-[Live Demo](#) · [Report a Bug](../../issues) · [Request a Feature](../../issues)
-
-</div>
+![Python](https://img.shields.io/badge/Python-3.11+-blue?style=flat-square&logo=python)
+![Semgrep](https://img.shields.io/badge/Semgrep-SAST-orange?style=flat-square)
+![Ollama](https://img.shields.io/badge/LLM-Ollama%20%7C%20Anthropic-green?style=flat-square)
+![License](https://img.shields.io/badge/License-MIT-purple?style=flat-square)
+![Status](https://img.shields.io/badge/Status-Active%20Development-brightgreen?style=flat-square)
 
 ---
 
-## The Problem
+## What Is CHAKRA?
 
-AI coding assistants are now part of nearly every developer workflow. They write fast, they write confidently, and they regularly write insecure code.
+CHAKRA is an agentic security intelligence platform for Python codebases. It combines static analysis with a three-stage LLM pipeline to detect vulnerabilities, reduce false positives, and generate actionable remediation guidance — including a novel **future-proofing field** that tells developers how to safely extend vulnerable code patterns without reintroducing the vulnerability.
 
-SQL injection vectors. Hardcoded credentials. Broken access control. Unsafe deserialization. These patterns don't disappear because an AI generated the function — they ship faster, at higher volume, with less scrutiny than ever before.
+It runs as a single Python process with no cloud dependencies. Source code never leaves your machine.
 
-Traditional scanners hand you a list of findings and stop there. The developer still has to understand the vulnerability, write a fix, test it, and hope they got it right.
+### Two Surfaces, One Brain
 
-CHAKRA closes the loop.
+| Surface | Who Uses It | What It Does |
+|---|---|---|
+| **VS Code Extension** | Developer writing code | Real-time scanning on every save, inline highlights, hover cards, CodeLens labels |
+| **Web Dashboard** | Tech lead / Security reviewer | Org-wide findings, repo scanner, Remediation Decision Matrix, severity trends |
 
----
-
-## How It Works
-
-CHAKRA is an **agentic security tool** — it doesn't just flag vulnerabilities, it acts on them.
-
-```
-Input (code / GitHub URL)
-        ↓
-   [Parser layer]          — Parses codebase by language and file type
-        ↓
-   [Core analysis]         — Identifies vulnerabilities, maps to CVE/OWASP categories
-        ↓
-   [Agent layer]           — Generates targeted patches for each finding
-        ↓
-   [Sandbox verification]  — Executes and verifies each patch in isolation
-        ↓
-   [Dashboard]             — Structured report: findings + verified fixes
-```
-
-The sandbox verification step is what makes CHAKRA agentic. It doesn't hand you an untested fix — it checks its own work first.
+Both surfaces share one backend, one database, and one detection pipeline.
 
 ---
 
-## Features
+## Key Features
 
-**Two input modes:**
-- Paste any code snippet directly for instant analysis
-- Provide a GitHub repository URL to audit the full codebase
+### Developer Surface (VS Code)
+- Scans on every `Ctrl+S` — results in under 5 seconds
+- **Delta scanning** — only analyses changed lines, not the full file
+- Inline severity highlights (red / orange / yellow by CWE risk)
+- CodeLens labels above every flagged line
+- Hover cards with attack scenario and fix buttons
+- Modal popup with full finding detail and Apply Fix gate
+- **Dismissed findings persist permanently** across VS Code and server restarts
 
-**Agentic patch generation:**
-For every vulnerability found, CHAKRA generates a remediation patch and runs it through a sandboxed verification step before surfacing it in the report.
+### Security Intelligence Pipeline
+Three sequential stages run on every scan:
 
-**Multi-language parser support:**
-The `parsers/` layer handles multiple languages and file types across a codebase.
+1. **Scout** — AST parsing extracts functions, classes, imports, and dangerous patterns structurally
+2. **Audit** — Semgrep static analysis combined with LLM false positive reduction
+3. **Remediate** — LLM generates four fields per finding:
+   - `explanation` — what is wrong and why it is dangerous
+   - `attack_scenario` — concrete attack vector specific to the code
+   - `fix_diff` — minimal before/after code diff
+   - `future_guidance` — **novel contribution** — how to safely extend this code in your future roadmap
 
-**Web dashboard:**
-Full TypeScript + HTML frontend — no CLI required. Results are surfaced in a structured, readable interface.
+### Organization Dashboard
+- Org-wide findings aggregated from all developers
+- Repository scanner — paste a GitHub URL and scan the entire codebase
+- Remediation Decision Matrix per finding (Apply Now / Defer / Assign Owner)
+- Severity distribution charts
+- Auto-refresh every 30 seconds
+- No installation required — open in any browser
 
-**Persistent scan history:**
-The `db/` layer stores past scan results for reference and comparison.
+### Privacy-First Architecture
+- **Ollama mode** — LLM runs fully locally, zero API calls, zero data leaves the machine
+- **Anthropic mode** — cloud LLM for higher quality output, switchable via one config line
+- Single Python process — no Docker, no Redis, no cloud services
+- SQLite for all persistence — one file, no database server
 
 ---
 
-## Architecture
+## Novel Contribution
 
-```
-C.H.A.K.R.A/
-├── agents/          # Agentic patch generation logic
-├── core/            # Vulnerability analysis engine
-├── parsers/         # Multi-language code parsers
-├── dashboard/       # TypeScript + HTML frontend
-├── sandbox/         # Isolated patch verification environment
-├── db/              # Scan result persistence
-├── config/          # Configuration and ruleset management
-├── main.py          # Entry point
-└── requirements.txt
-```
+The `future_guidance` field is CHAKRA's primary research contribution. No existing published security tool answers the question:
+
+> *"If my roadmap requires adding OAuth next sprint, how do I do that safely given this vulnerability?"*
+
+Every tool on the market tells you what is wrong and how to fix it **right now**. CHAKRA additionally tells you how to **extend the code safely in the future** — a gap identified across the published literature on automated vulnerability repair.
 
 ---
 
-## Getting Started
+## Supported Vulnerability Patterns
+
+CHAKRA detects 8 CWE categories with 24 Semgrep rules:
+
+| CWE | Vulnerability | Severity |
+|---|---|---|
+| CWE-89 | SQL Injection | HIGH |
+| CWE-78 | OS Command Injection | HIGH |
+| CWE-502 | Insecure Deserialization (pickle) | HIGH |
+| CWE-95 | Code Injection (eval/exec) | HIGH |
+| CWE-798 | Hardcoded Credentials | HIGH |
+| CWE-22 | Path Traversal | HIGH |
+| CWE-328 | Weak Cryptographic Hash (MD5/SHA1) | MEDIUM |
+| CWE-338 | Insecure Randomness | MEDIUM |
+
+---
+
+## vs. Existing Tools
+
+| Capability | CHAKRA | Snyk | SonarQube | Semgrep | Bandit |
+|---|---|---|---|---|---|
+| Finds vulnerabilities | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Generates patch diff | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Future-proofing guidance** | ✅ | ❌ | ❌ | ❌ | ❌ |
+| LLM false positive filtering | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Air-gapped local LLM mode** | ✅ | ❌ | ❌ | ❌ | ✅ |
+| Real-time IDE integration | ✅ | Partial | ❌ | ❌ | ❌ |
+| **Delta scanning** | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Org-wide dashboard | ✅ | ✅ | ✅ | ❌ | ❌ |
+| GitHub repo audit | ✅ | ✅ | ✅ | ✅ | ❌ |
+| Free / open source | ✅ MIT | ❌ | ❌ | ✅ limited | ✅ |
+
+---
+
+## Quick Start
+
+### Requirements
+- Python 3.11 or higher
+- Git
+- [Ollama](https://ollama.com) (for local LLM mode) or an Anthropic API key
+
+### Local Setup
 
 ```bash
-git clone https://github.com/MSrinivasaAditya/C.H.A.K.R.A.git
-cd C.H.A.K.R.A
+# Clone the repository
+git clone https://github.com/yourusername/VibeSentinel.git
+cd VibeSentinel
+
+# Copy environment config
+copy .env.example .env
+
+# Install dependencies
 pip install -r requirements.txt
-python main.py
+
+# Pull the LLM model (local mode)
+ollama pull qwen2.5:0.5b
+
+# Start the server
+python backend\chakra_server.py
 ```
 
-On Windows, use the included PowerShell scripts:
-```powershell
-./start_app.ps1     # Start the application
-./restart_app.ps1   # Restart after changes
-./stop_app.ps1      # Stop the application
+Server starts at `http://127.0.0.1:7777`
+
+Open the dashboard at `http://127.0.0.1:7777/dashboard`
+
+### VS Code Extension
+
+```bash
+cd extension
+npm install
+npm run compile
+```
+
+Press `F5` in VS Code to launch the Extension Development Host. Open any Python file and press `Ctrl+S` to trigger a scan.
+
+### Configuration
+
+Edit `.env` to configure:
+
+```env
+# LLM Backend: "ollama" (local, free) or "anthropic" (cloud, requires API key)
+LLM_BACKEND=ollama
+OLLAMA_HOST=http://localhost:11434
+OLLAMA_MODEL=qwen2.5:0.5b
+
+# Server mode: "local" (127.0.0.1) or "server" (0.0.0.0 for org deployment)
+DEPLOYMENT_MODE=local
+
+# Optional auth token for org deployments
+AUTH_TOKEN=
+
+# Default org ID for multi-team deployments
+DEFAULT_ORG_ID=default
 ```
 
 ---
 
-## Vulnerability Coverage
+## Organization Deployment
 
-| Category | Examples |
-|---|---|
-| Injection flaws | SQL injection, command injection, SSTI |
-| Broken access control | IDOR patterns, privilege escalation |
-| Sensitive data exposure | Hardcoded secrets, API keys, tokens |
-| Security misconfigurations | Insecure defaults, debug exposure |
-| Insecure deserialization | Unsafe eval/exec/pickle patterns |
-| AI-generated code patterns | LLM output-specific vulnerability signatures |
+For teams, run CHAKRA on a shared server. Every developer only needs to install the VS Code extension and change one setting:
+
+```
+chakra.serverUrl = http://<your-server-ip>:7777
+```
+
+No per-machine Python installation. No per-machine API key. One server, all findings in one place.
+
+**Server setup:**
+
+```bash
+# On the server machine
+DEPLOYMENT_MODE=server
+AUTH_TOKEN=your_chosen_token
+
+# Run start script
+bash start_server.sh
+```
+
+Open port 7777 on your internal firewall. Share the server IP and auth token with your team.
+
+---
+
+## API Reference
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/scan` | POST | Scan a file — accepts `filepath`, `source`, `org_id`, `dev_id` |
+| `/dismiss` | POST | Permanently dismiss a finding by `dismissal_fingerprint` |
+| `/findings` | GET | All active findings for an org — `?org_id=default` |
+| `/stats` | GET | Scan metrics and finding counts — `?org_id=default` |
+| `/scan/repo` | POST | Trigger async GitHub repo scan — accepts `repo_url` |
+| `/scan/repo/status/:id` | GET | Poll repo scan status and results |
+| `/config` | GET | Server configuration and defaults |
+| `/dashboard` | GET | Serves the web dashboard HTML |
+
+---
+
+## Project Structure
+
+```
+VibeSentinel/
+├── backend/
+│   ├── chakra_server.py          # Single HTTP server, all endpoints
+│   ├── delta.py                  # Delta scanning, line fingerprinting
+│   ├── pipeline/
+│   │   ├── stage_scout.py        # AST analysis, structure extraction
+│   │   ├── stage_audit.py        # Semgrep + LLM false positive reduction
+│   │   └── stage_remediate.py    # LLM enrichment, future_guidance generation
+│   ├── db/
+│   │   └── state_manager.py      # All SQLite operations
+│   ├── llm/
+│   │   └── llm_client.py         # Dual-mode: Ollama + Anthropic
+│   └── rules/
+│       └── chakra_rules.yaml     # 24 Semgrep rules, 8 CWEs
+├── dashboard/
+│   └── dashboard.html            # Self-contained web dashboard
+├── extension/
+│   └── src/
+│       └── extension.ts          # VS Code extension
+├── demo/
+│   └── chakra_demo_app.py        # 7 deliberate vulnerabilities for testing
+├── .env.example
+├── requirements.txt
+├── start_server.sh
+└── start_server.bat
+```
+
+---
+
+## Research Background
+
+CHAKRA is developed as part of academic research targeting publication in IEEE Access / IEEE SecDev. The primary novel contribution is **Developer Decision Intelligence** — a vulnerability reporting framework that extends existing SAST+LLM pipelines with scope-aware patch rationale and future-proofing guidance.
+
+### Key References
+
+- Steenhoek et al. — DeepVulGuard (ICSE 2025)
+- Gajjar et al. — SecureFixAgent (ICMLA 2025, arXiv:2509.16275)
+- Fu et al. — VulRepair (ACM ESEC/FSE 2022)
+- Pearce et al. — Zero-shot vulnerability repair (IEEE S&P 2023)
+- Hu et al. — SoK on Automated Vulnerability Repair (USENIX Security 2025)
 
 ---
 
 ## Roadmap
 
-- [x] Paste-and-scan code analysis
-- [x] GitHub repository audit
-- [x] Agentic patch generation
-- [x] Sandboxed patch verification
-- [x] Web dashboard with scan history
-- [ ] PR diff scanning for CI/CD pipelines
-- [ ] GitHub Actions integration
-- [ ] Expanded AI-specific vulnerability ruleset
-- [ ] Private repository support
-
----
-
-## Built By
-
-**M Srinivasa Aditya** — B.E. CSE (Honors in Cybersecurity), graduating 2026
-
-Former intern at CERT-IN (India's national cybersecurity agency) and Telangana Cyber Security Bureau. Built CHAKRA after observing a consistent pattern during real-world pentesting: AI-generated code shipped at scale, without security review.
-
-→ [LinkedIn](https://www.linkedin.com/in/msa2204/) · [GitHub](https://github.com/MSrinivasaAditya)
+- [ ] Benchmark evaluation on OWASP WebGoat (Precision / Recall / F1 vs Bandit and Semgrep)
+- [ ] GitHub Actions CI/CD integration
+- [ ] JavaScript and TypeScript language support
+- [ ] Sandboxed patch verification via isolated execution
+- [ ] PR diff scanning — scan only changed files in a pull request
+- [ ] SARIF report export for integration with GitHub Security tab
 
 ---
 
 ## Contributing
 
-Contributions welcome — especially around expanding vulnerability rulesets and parser support for additional languages. Open an issue to discuss before submitting a PR.
+Contributions are welcome. Please open an issue before submitting a pull request describing the change and its motivation.
 
 ---
 
 ## License
 
-MIT
+MIT License — see [LICENSE](LICENSE) for details.
 
 ---
 
-<div align="center">
-<sub>The AI wrote the code. Did anyone check it?</sub>
-</div>
+## Acknowledgements
+
+Built with [Semgrep](https://semgrep.dev), [Ollama](https://ollama.com), and the [Anthropic API](https://anthropic.com). Vulnerability patterns informed by OWASP Top 10 and NIST NVD CWE classifications.
+
+---
+
+*CHAKRA is a research project and should be used as one layer of a broader security strategy, not as a sole security control.*
