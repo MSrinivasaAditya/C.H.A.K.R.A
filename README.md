@@ -121,7 +121,7 @@ CHAKRA detects 8 CWE categories with 24 Semgrep rules:
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/VibeSentinel.git
+git clone https://github.com/MSrinivasaAditya/C.H.A.K.R.A
 cd VibeSentinel
 
 # Copy environment config
@@ -216,7 +216,7 @@ Open port 7777 on your internal firewall. Share the server IP and auth token wit
 ## Project Structure
 
 ```
-VibeSentinel/
+C.H.A.K.R.A/
 ├── backend/
 │   ├── chakra_server.py          # Single HTTP server, all endpoints
 │   ├── delta.py                  # Delta scanning, line fingerprinting
